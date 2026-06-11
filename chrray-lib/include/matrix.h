@@ -29,6 +29,11 @@ public:
     euclidean_coordinate normalize() const;
     homogeneous_coordinate homogenize() const;
 
+    euclidean_coordinate operator-() const;
+    friend euclidean_coordinate operator*(
+        double scalar, const euclidean_coordinate& vec);
+    bool operator==(const euclidean_coordinate& other) const;
+
 private:
     std::vector<double> container_;
 };
@@ -59,6 +64,11 @@ public:
     homogeneous_coordinate normalize() const;
     euclidean_coordinate dehomogenize() const;
 
+    homogeneous_coordinate operator-() const;
+    friend homogeneous_coordinate operator*(
+        double scalar, const homogeneous_coordinate& vec);
+    bool operator==(const homogeneous_coordinate& other) const;
+
 private:
     std::vector<double> container_;
 };
@@ -84,6 +94,7 @@ public:
     double length() const;
     quaternion normalize() const;
     euclidean_coordinate rotate_vector(const euclidean_coordinate& vec) const;
+    bool operator==(const quaternion& other) const;
 
 private:
     std::vector<double> container_;
@@ -105,6 +116,7 @@ public:
 
     homogeneous_transform operator*(const homogeneous_transform& other) const;
     homogeneous_coordinate operator*(const homogeneous_coordinate& vec) const;
+    bool operator==(const homogeneous_transform& other) const;
 
 private:
     std::vector<double> container_;

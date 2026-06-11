@@ -99,7 +99,19 @@ homogeneous_coordinate euclidean_coordinate::homogenize() const {
     return homogeneous_coordinate(
         container_[0], container_[1], container_[2], 1);
 }
-
+euclidean_coordinate euclidean_coordinate::operator-() const {
+    return euclidean_coordinate(-container_[0], -container_[1], -container_[2]);
+}
+euclidean_coordinate operator*(double scalar, const euclidean_coordinate& vec) {
+    return euclidean_coordinate(
+        vec.container_[0] * scalar, vec.container_[1] * scalar,
+        vec.container_[2] * scalar);
+}
+bool euclidean_coordinate::operator==(const euclidean_coordinate& other) const {
+    return container_[0] == other.container_[0] &&
+           container_[1] == other.container_[1] &&
+           container_[2] == other.container_[2];
+}
 homogeneous_coordinate::homogeneous_coordinate(
     std::initializer_list<double> values)
     : container_(values) {
@@ -205,6 +217,23 @@ euclidean_coordinate homogeneous_coordinate::dehomogenize() const {
         container_[0] / container_[3], container_[1] / container_[3],
         container_[2] / container_[3]);
 }
+homogeneous_coordinate homogeneous_coordinate::operator-() const {
+    return homogeneous_coordinate(
+        -container_[0], -container_[1], -container_[2], -container_[3]);
+}
+homogeneous_coordinate operator*(
+    double scalar, const homogeneous_coordinate& vec) {
+    return homogeneous_coordinate(
+        vec.container_[0] * scalar, vec.container_[1] * scalar,
+        vec.container_[2] * scalar, vec.container_[3] * scalar);
+}
+bool homogeneous_coordinate::operator==(
+    const homogeneous_coordinate& other) const {
+    return container_[0] == other.container_[0] &&
+           container_[1] == other.container_[1] &&
+           container_[2] == other.container_[2] &&
+           container_[3] == other.container_[3];
+}
 
 quaternion::quaternion() : container_(4, 0) {}
 quaternion::quaternion(std::initializer_list<double> values)
@@ -304,6 +333,12 @@ quaternion quaternion::from_axis_angle(
     return quaternion(
         normalized_axis.x() * sin_half, normalized_axis.y() * sin_half,
         normalized_axis.z() * sin_half, std::cos(half_angle));
+}
+bool quaternion::operator==(const quaternion& other) const {
+    return container_[0] == other.container_[0] &&
+           container_[1] == other.container_[1] &&
+           container_[2] == other.container_[2] &&
+           container_[3] == other.container_[3];
 }
 
 homogeneous_transform::homogeneous_transform() : container_(16, 0) {
@@ -427,6 +462,15 @@ homogeneous_transform homogeneous_transform::rotation(
     result(3, 2) = 0;
     result(3, 3) = 1;
     return result;
+}
+bool homogeneous_transform::operator==(
+    const homogeneous_transform& other) const {
+    for (size_t i = 0; i < 16; ++i) {
+        if (container_[i] != other.container_[i]) {
+            return false;
+        }
+    }
+    return true;
 }
 
 }  // namespace chrray

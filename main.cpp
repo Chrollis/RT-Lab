@@ -8,7 +8,6 @@ int main() {
     while (running) {
         if (peekmessage(&msg)) {
         }
-
         BeginBatchDraw();
         cleardevice();
         EndBatchDraw();
