@@ -5,13 +5,13 @@
 #include <limits>
 
 namespace chrray {
-constexpr double pi = 3.14159265358979323846;
-constexpr double inf = std::numeric_limits<double>::infinity();
-constexpr double eps = 1e-6;
+constexpr float pi = 3.14159267f;
+constexpr float inf = std::numeric_limits<float>::infinity();
+constexpr float eps = 5e-4f;
 
 void init_random();
-double random_double();
-double random_double(double min, double max);
+float random_float();
+float random_float(float min, float max);
 
 euclidean_coordinate random_in_unit_sphere();
 euclidean_coordinate random_on_unit_sphere();
@@ -23,28 +23,35 @@ euclidean_coordinate reflect(
 bool refract(
     const euclidean_coordinate& v,
     const euclidean_coordinate& n,
-    double ni_over_nt,
+    float ni_over_nt,
     euclidean_coordinate& refracted);
-double schlick(double cosine, double refraction_index);
+float schlick(float cosine, float refraction_index);
 
 struct aabb {
     euclidean_coordinate min;
     euclidean_coordinate max;
     aabb();
     aabb(const euclidean_coordinate& a, const euclidean_coordinate& b);
+    bool hit_interval(
+        const euclidean_coordinate& origin,
+        const euclidean_coordinate& dir,
+        float t_min,
+        float t_max,
+        float& t_entry,
+        float& t_exit) const;
     bool hit(
         const euclidean_coordinate& origin,
         const euclidean_coordinate& dir,
-        double t_min,
-        double t_max) const;
-    double surface_area() const;
+        float t_min,
+        float t_max) const;
+    float surface_area() const;
 };
 aabb surrounding_box(const aabb& box0, const aabb& box1);
 euclidean_coordinate barycentric_interpolate(
     const euclidean_coordinate& v0,
     const euclidean_coordinate& v1,
     const euclidean_coordinate& v2,
-    double u,
-    double v);
+    float u,
+    float v);
 
 }  // namespace chrray

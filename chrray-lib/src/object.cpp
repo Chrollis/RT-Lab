@@ -14,42 +14,48 @@ const euclidean_coordinate& ray::origin() const {
 const euclidean_coordinate& ray::direction() const {
     return direction_;
 }
-euclidean_coordinate ray::at(double t) const {
+euclidean_coordinate ray::at(float t) const {
     return origin_ + t * direction_;
 }
 
-hit_record::hit_record() : t(0.0), u(0.0), v(0.0) {}
+hit_record::hit_record() : t(0.0f), u(0.0f), v(0.0f) {}
+
+bool hittable::any_hit(const ray& r, float t_min, float t_max) const {
+    hit_record rec;
+    return intersect(r, t_min, t_max, rec);
+}
 
 sphere::sphere(
     const euclidean_coordinate& center,
-    double radius,
+    float radius,
     std::shared_ptr<material> mat)
     : center_(center), radius_(radius), mat_(mat) {}
 
 bool sphere::intersect(
-    const ray& r, double t_min, double t_max, hit_record& rec) const {
+    const ray& r, float t_min, float t_max, hit_record& rec) const {
     euclidean_coordinate oc = r.origin() - center_;
-    double a = r.direction().dot(r.direction());
-    double b = 2.0 * oc.dot(r.direction());
-    double c = oc.dot(oc) - radius_ * radius_;
-    double discriminant = b * b - 4 * a * c;
-    if (discriminant < 0) return false;
+    float a = r.direction().dot(r.direction());
+    float b = 2.0f * oc.dot(r.direction());
+    float c = oc.dot(oc) - radius_ * radius_;
+    float discriminant = b * b - 4.0f * a * c;
+    if (discriminant < -eps) return false;
+    if (discriminant < 0.0f) discriminant = 0.0f;
 
-    double sqrt_d = std::sqrt(discriminant);
-    double t = (-b - sqrt_d) / (2.0 * a);
+    float sqrt_d = std::sqrtf(discriminant);
+    float t = (-b - sqrt_d) / (2.0f * a);
     if (t < t_min || t > t_max) {
-        t = (-b + sqrt_d) / (2.0 * a);
+        t = (-b + sqrt_d) / (2.0f * a);
         if (t < t_min || t > t_max) return false;
     }
     rec.t = t;
     rec.p = r.at(t);
     rec.n = (rec.p - center_) / radius_;
     if (rec.n.dot(r.direction()) > 0) {
-        rec.n = rec.n * (-1.0);
+        rec.n = rec.n * (-1.0f);
     }
     rec.mat = mat_;
-    double theta = acos(-rec.n.y());
-    double phi = atan2(-rec.n.z(), rec.n.x()) + pi;
+    float theta = acos(-rec.n.y());
+    float phi = atan2(-rec.n.z(), rec.n.x()) + pi;
     rec.u = phi / (2 * pi);
     rec.v = theta / pi;
     return true;
@@ -71,30 +77,30 @@ triangle::triangle(
 }
 
 bool triangle::intersect(
-    const ray& r, double t_min, double t_max, hit_record& rec) const {
+    const ray& r, float t_min, float t_max, hit_record& rec) const {
     euclidean_coordinate e1 = v1_ - v0_;
     euclidean_coordinate e2 = v2_ - v0_;
     euclidean_coordinate pvec = r.direction().cross(e2);
-    double det = e1.dot(pvec);
+    float det = e1.dot(pvec);
     if (fabs(det) < eps) return false;
 
-    double inv_det = 1.0 / det;
+    float inv_det = 1.0f / det;
     euclidean_coordinate tvec = r.origin() - v0_;
-    double u = tvec.dot(pvec) * inv_det;
-    if (u < 0.0 || u > 1.0) return false;
+    float u = tvec.dot(pvec) * inv_det;
+    if (u < 0.0f || u > 1.0f) return false;
 
     euclidean_coordinate qvec = tvec.cross(e1);
-    double v = r.direction().dot(qvec) * inv_det;
-    if (v < 0.0 || u + v > 1.0) return false;
+    float v = r.direction().dot(qvec) * inv_det;
+    if (v < 0.0f || u + v > 1.0f) return false;
 
-    double t = e2.dot(qvec) * inv_det;
+    float t = e2.dot(qvec) * inv_det;
     if (t < t_min || t > t_max) return false;
 
     rec.t = t;
     rec.p = r.at(t);
     rec.n = normal_;
     if (rec.n.dot(r.direction()) > 0) {
-        rec.n = rec.n * (-1.0);
+        rec.n = rec.n * (-1.0f);
     }
     rec.mat = mat_;
     rec.u = u;
@@ -120,29 +126,29 @@ plane::plane(
     : point_(point), normal_(normal.normalize()), mat_(mat) {}
 
 bool plane::intersect(
-    const ray& r, double t_min, double t_max, hit_record& rec) const {
-    double denom = r.direction().dot(normal_);
+    const ray& r, float t_min, float t_max, hit_record& rec) const {
+    float denom = r.direction().dot(normal_);
     if (fabs(denom) < eps) return false;
 
-    double t = (point_ - r.origin()).dot(normal_) / denom;
+    float t = (point_ - r.origin()).dot(normal_) / denom;
     if (t < t_min || t > t_max) return false;
 
     rec.t = t;
     rec.p = r.at(t);
     rec.n = normal_;
     if (rec.n.dot(r.direction()) > 0) {
-        rec.n = rec.n * (-1.0);
+        rec.n = rec.n * (-1.0f);
     }
     rec.mat = mat_;
-    rec.u = 0.0;
-    rec.v = 0.0;
+    rec.u = 0.0f;
+    rec.v = 0.0f;
     return true;
 }
 aabb plane::bounding_box() const {
-    const double big = 1e10;
+    const float half_size = 50;
     return aabb(
-        euclidean_coordinate(-big, -big, -big),
-        euclidean_coordinate(big, big, big));
+        euclidean_coordinate(-half_size, -half_size, -half_size),
+        euclidean_coordinate(half_size, half_size, half_size));
 }
 
 mesh::mesh(const std::filesystem::path& filepath, std::shared_ptr<material> mat)
@@ -160,7 +166,7 @@ mesh::mesh(const std::filesystem::path& filepath, std::shared_ptr<material> mat)
         std::string prefix;
         iss >> prefix;
         if (prefix == "v") {
-            double x, y, z;
+            float x, y, z;
             iss >> x >> y >> z;
             vertices.emplace_back(x, y, z);
         } else if (prefix == "f") {
@@ -192,9 +198,9 @@ mesh::mesh(const std::filesystem::path& filepath, std::shared_ptr<material> mat)
     }
 }
 bool mesh::intersect(
-    const ray& r, double t_min, double t_max, hit_record& rec) const {
+    const ray& r, float t_min, float t_max, hit_record& rec) const {
     bool hit_anything = false;
-    double closest_so_far = t_max;
+    float closest_so_far = t_max;
     hit_record temp_rec;
     for (const auto& tri : triangles_) {
         if (tri->intersect(r, t_min, closest_so_far, temp_rec)) {

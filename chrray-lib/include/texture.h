@@ -5,17 +5,17 @@
 
 namespace chrray {
 struct color {
-    double r, g, b, a;
+    float r, g, b, a;
     color();
-    color(double r, double g, double b, double a);
-    color(const euclidean_coordinate& rgb, double a);
+    color(float r, float g, float b, float a);
+    color(const euclidean_coordinate& rgb, float a);
 
     color operator+(const color& other) const;
     color operator*(const color& other) const;
-    color operator*(double t) const;
-    friend color operator*(double t, const color& c);
+    color operator*(float t) const;
+    friend color operator*(float t, const color& c);
 
-    color gamma_correct(double gamma) const;
+    color gamma_correct(float gamma) const;
     friend color blend(const color& c1, const color& c2);
     COLORREF to_colorref(COLORREF bg) const;
 
@@ -58,9 +58,9 @@ public:
         const hit_record& rec, const euclidean_coordinate& view_dir) const;
     virtual color specular_color(
         const hit_record& rec, const euclidean_coordinate& view_dir) const;
-    virtual double specular_strength(
+    virtual float specular_strength(
         const hit_record& rec, const euclidean_coordinate& view_dir) const;
-    virtual double shininess(const hit_record& rec) const;
+    virtual float shininess(const hit_record& rec) const;
     virtual color emitted(const hit_record& rec) const;
 };
 
@@ -82,7 +82,7 @@ private:
 
 class metal : public material {
 public:
-    metal(const color& albedo, double fuzziness = 0.0);
+    metal(const color& albedo, float fuzziness = 0.0f);
     virtual bool scatter(
         const ray& in,
         const hit_record& rec,
@@ -91,22 +91,22 @@ public:
     virtual color specular_color(
         const hit_record& rec,
         const euclidean_coordinate& view_dir) const override;
-    virtual double specular_strength(
+    virtual float specular_strength(
         const hit_record& rec,
         const euclidean_coordinate& view_dir) const override;
-    virtual double shininess(const hit_record& rec) const override;
+    virtual float shininess(const hit_record& rec) const override;
 
 private:
     color albedo_;
-    double fuzziness_;
+    float fuzziness_;
 };
 
 class dielectric : public material {
 public:
     dielectric(
-        double refraction_index,
+        float refraction_index,
         const color& attenuation = color(1, 1, 1, 1),
-        double absorption_strength = 0.0);
+        float absorption_strength = 0.0f);
     virtual bool scatter(
         const ray& in,
         const hit_record& rec,
@@ -115,16 +115,16 @@ public:
     virtual color specular_color(
         const hit_record& rec,
         const euclidean_coordinate& view_dir) const override;
-    virtual double specular_strength(
+    virtual float specular_strength(
         const hit_record& rec,
         const euclidean_coordinate& view_dir) const override;
-    virtual double shininess(const hit_record& rec) const override;
+    virtual float shininess(const hit_record& rec) const override;
 
 private:
-    double refraction_index_;
+    float refraction_index_;
     color attenuation_;
-    double absorption_strength_;
+    float absorption_strength_;
 
-    static double schlick(double cosine, double ri);
+    static float schlick(float cosine, float ri);
 };
 }  // namespace chrray

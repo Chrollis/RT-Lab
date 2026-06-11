@@ -2,18 +2,18 @@
 #include <algorithm>
 
 namespace chrray {
-color::color() : r(0.0), b(0.0), g(0.0), a(1.0) {}
-color::color(double r, double g, double b, double a) {
-    this->r = std::clamp(r, 0.0, 1.0);
-    this->g = std::clamp(g, 0.0, 1.0);
-    this->b = std::clamp(b, 0.0, 1.0);
-    this->a = std::clamp(a, 0.0, 1.0);
+color::color() : r(0.0f), b(0.0f), g(0.0f), a(1.0f) {}
+color::color(float r, float g, float b, float a) {
+    this->r = std::clamp(r, 0.0f, 1.0f);
+    this->g = std::clamp(g, 0.0f, 1.0f);
+    this->b = std::clamp(b, 0.0f, 1.0f);
+    this->a = std::clamp(a, 0.0f, 1.0f);
 }
-color::color(const euclidean_coordinate& rgb, double a) {
-    this->r = std::clamp(rgb[0], 0.0, 1.0);
-    this->g = std::clamp(rgb[1], 0.0, 1.0);
-    this->b = std::clamp(rgb[2], 0.0, 1.0);
-    this->a = std::clamp(a, 0.0, 1.0);
+color::color(const euclidean_coordinate& rgb, float a) {
+    this->r = std::clamp(rgb[0], 0.0f, 1.0f);
+    this->g = std::clamp(rgb[1], 0.0f, 1.0f);
+    this->b = std::clamp(rgb[2], 0.0f, 1.0f);
+    this->a = std::clamp(a, 0.0f, 1.0f);
 }
 
 color color::operator+(const color& other) const {
@@ -22,102 +22,102 @@ color color::operator+(const color& other) const {
 color color::operator*(const color& other) const {
     return color(r * other.r, g * other.g, b * other.b, a * other.a);
 }
-color color::operator*(double t) const {
+color color::operator*(float t) const {
     return color(r * t, g * t, b * t, a * t);
 }
-color operator*(double t, const color& c) {
+color operator*(float t, const color& c) {
     return color(c.r * t, c.g * t, c.b * t, c.a * t);
 }
 
-color color::gamma_correct(double gamma) const {
-    double inv = 1.0 / gamma;
-    return color(pow(r, inv), pow(g, inv), powf(b, inv), a);
+color color::gamma_correct(float gamma) const {
+    float inv = 1.0f / gamma;
+    return color(powf(r, inv), powf(g, inv), powf(b, inv), a);
 }
 color blend(const color& c1, const color& c2) {
     return color(
-        c1.r * c1.a + c2.r * c2.a * (1.0 - c1.a),
-        c1.g * c1.a + c2.g * c2.a * (1.0 - c1.a),
-        c1.b * c1.a + c2.b * c2.a * (1.0 - c1.a), c1.a + c2.a * (1.0 - c1.a));
+        c1.r * c1.a + c2.r * c2.a * (1.0f - c1.a),
+        c1.g * c1.a + c2.g * c2.a * (1.0f - c1.a),
+        c1.b * c1.a + c2.b * c2.a * (1.0f - c1.a), c1.a + c2.a * (1.0f - c1.a));
 }
 COLORREF color::to_colorref(COLORREF bg) const {
     color blended = blend(
         *this, color(
-                   GetRValue(bg) / 255.0, GetGValue(bg) / 255.0,
-                   GetBValue(bg) / 255.0, 1.0));
+                   GetRValue(bg) / 255.0f, GetGValue(bg) / 255.0f,
+                   GetBValue(bg) / 255.0f, 1.0f));
     return RGB(
-        static_cast<BYTE>(blended.r * 255.0),
-        static_cast<BYTE>(blended.g * 255.0),
-        static_cast<BYTE>(blended.b * 255.0));
+        static_cast<BYTE>(blended.r * 255.0f),
+        static_cast<BYTE>(blended.g * 255.0f),
+        static_cast<BYTE>(blended.b * 255.0f));
 }
 
 color color::black() {
-    return color(0.0, 0.0, 0.0, 1.0);
+    return color(0.0f, 0.0f, 0.0f, 1.0f);
 }
 color color::white() {
-    return color(1.0, 1.0, 1.0, 1.0);
+    return color(1.0f, 1.0f, 1.0f, 1.0f);
 }
 color color::gray() {
-    return color(0.5, 0.5, 0.5, 1.0);
+    return color(0.5f, 0.5f, 0.5f, 1.0f);
 }
 color color::dark_gray() {
-    return color(0.25, 0.25, 0.25, 1.0);
+    return color(0.25f, 0.25f, 0.25f, 1.0f);
 }
 color color::light_gray() {
-    return color(0.75, 0.75, 0.75, 1.0);
+    return color(0.75f, 0.75f, 0.75f, 1.0f);
 }
 color color::red() {
-    return color(1.0, 0.0, 0.0, 1.0);
+    return color(1.0f, 0.0f, 0.0f, 1.0f);
 }
 color color::dark_red() {
-    return color(0.5, 0.0, 0.0, 1.0);
+    return color(0.5f, 0.0f, 0.0f, 1.0f);
 }
 color color::light_red() {
-    return color(1.0, 0.5, 0.5, 1.0);
+    return color(1.0f, 0.5f, 0.5f, 1.0f);
 }
 color color::blue() {
-    return color(0.0, 0.0, 1.0, 1.0);
+    return color(0.0f, 0.0f, 1.0f, 1.0f);
 }
 color color::dark_blue() {
-    return color(0.0, 0.0, 0.5, 1.0);
+    return color(0.0f, 0.0f, 0.5f, 1.0f);
 }
 color color::light_blue() {
-    return color(0.5, 0.5, 1.0, 1.0);
+    return color(0.5f, 0.5f, 1.0f, 1.0f);
 }
 color color::green() {
-    return color(0.0, 1.0, 0.0, 1.0);
+    return color(0.0f, 1.0f, 0.0f, 1.0f);
 }
 color color::dark_green() {
-    return color(0.0, 0.5, 0.0, 1.0);
+    return color(0.0f, 0.5f, 0.0f, 1.0f);
 }
 color color::light_green() {
-    return color(0.5, 1.0, 0.5, 1.0);
+    return color(0.5f, 1.0f, 0.5f, 1.0f);
 }
 color color::yellow() {
-    return color(1.0, 1.0, 0.0, 1.0);
+    return color(1.0f, 1.0f, 0.0f, 1.0f);
 }
 color color::dark_yellow() {
-    return color(0.5, 0.5, 0.0, 1.0);
+    return color(0.5f, 0.5f, 0.0f, 1.0f);
 }
 color color::light_yellow() {
-    return color(1.0, 1.0, 0.5, 1.0);
+    return color(1.0f, 1.0f, 0.5f, 1.0f);
 }
 color color::magenta() {
-    return color(1.0, 0.0, 1.0, 1.0);
+    return color(1.0f, 0.0f, 1.0f, 1.0f);
 }
 color color::dark_magenta() {
-    return color(0.5, 0.0, 0.5, 1.0);
+    return color(0.5f, 0.0f, 0.5f, 1.0f);
 }
 color color::light_magenta() {
-    return color(1.0, 0.5, 1.0, 1.0);
+    return color(1.0f, 0.5f, 1.0f, 1.0f);
 }
 color color::cyan() {
-    return color(0.0, 1.0, 1.0, 1.0);
+    return color(0.0f, 1.0f, 1.0f, 1.0f);
 }
 color color::dark_cyan() {
-    return color(0.0, 0.5, 0.5, 1.0);
+    return color(0.0f, 0.5f, 0.5f, 1.0f);
 }
 color color::light_cyan() {
-    return color(0.5, 1.0, 1.0, 1.0);
+    return color(0.5f, 1.0f, 1.0f, 1.0f);
 }
 
 color material::diffuse_color(
@@ -128,12 +128,12 @@ color material::specular_color(
     const hit_record& rec, const euclidean_coordinate& view_dir) const {
     return color::black();
 }
-double material::specular_strength(
+float material::specular_strength(
     const hit_record& rec, const euclidean_coordinate& view_dir) const {
-    return 0.0;
+    return 0.0f;
 }
-double material::shininess(const hit_record& rec) const {
-    return 1.0;
+float material::shininess(const hit_record& rec) const {
+    return 1.0f;
 }
 color material::emitted(const hit_record& rec) const {
     return color::black();
@@ -155,15 +155,15 @@ color lambertian::diffuse_color(
     return albedo_;
 }
 
-metal::metal(const color& albedo, double fuzziness)
-    : albedo_(albedo), fuzziness_(std::clamp(fuzziness, 0.0, 1.0)) {}
+metal::metal(const color& albedo, float fuzziness)
+    : albedo_(albedo), fuzziness_(std::clamp(fuzziness, 0.0f, 1.0f)) {}
 bool metal::scatter(
     const ray& in, const hit_record& rec, color& attenuation, ray& out) const {
     euclidean_coordinate reflected = reflect(in.direction().normalize(), rec.n);
-    if (fuzziness_ > 0.0) {
+    if (fuzziness_ > 0.0f) {
         reflected = reflected + fuzziness_ * random_in_unit_sphere();
     }
-    if (reflected.dot(rec.n) <= 0.0) {
+    if (reflected.dot(rec.n) <= 0.0f) {
         return false;
     }
     out = ray(rec.p, reflected.normalize());
@@ -174,33 +174,31 @@ color metal::specular_color(
     const hit_record& rec, const euclidean_coordinate& view_dir) const {
     return albedo_;
 }
-double metal::specular_strength(
+float metal::specular_strength(
     const hit_record& rec, const euclidean_coordinate& view_dir) const {
-    return 1.0 - fuzziness_ * 0.5;
+    return 1.0f - fuzziness_ * 0.5f;
 }
-double metal::shininess(const hit_record& rec) const {
-    double shine = 1.0 / (fuzziness_ + 1e-4);
-    if (shine > 1000.0) shine = 1000.0;
+float metal::shininess(const hit_record& rec) const {
+    float shine = 1.0f / (fuzziness_ + 1e-4f);
+    if (shine > 1000.0f) shine = 1000.0f;
     return shine;
 }
 
 dielectric::dielectric(
-    double refraction_index,
-    const color& attenuation,
-    double absorption_strength)
+    float refraction_index, const color& attenuation, float absorption_strength)
     : refraction_index_(refraction_index),
       attenuation_(attenuation),
       absorption_strength_(absorption_strength) {}
 bool dielectric::scatter(
     const ray& in, const hit_record& rec, color& attenuation, ray& out) const {
     euclidean_coordinate outward_normal;
-    double ni_over_nt;
-    double cosine;
-    double reflect_prob;
+    float ni_over_nt;
+    float cosine;
+    float reflect_prob;
 
-    if (in.direction().dot(rec.n) < 0.0) {
+    if (in.direction().dot(rec.n) < 0.0f) {
         outward_normal = rec.n;
-        ni_over_nt = 1.0 / refraction_index_;
+        ni_over_nt = 1.0f / refraction_index_;
         cosine = -in.direction().dot(rec.n);
     } else {
         outward_normal = -rec.n;
@@ -212,18 +210,18 @@ bool dielectric::scatter(
     if (refract(in.direction(), outward_normal, ni_over_nt, refracted)) {
         reflect_prob = schlick(cosine, refraction_index_);
     } else {
-        reflect_prob = 1.0;
+        reflect_prob = 1.0f;
     }
 
-    if (random_double() < reflect_prob) {
+    if (random_float() < reflect_prob) {
         euclidean_coordinate reflected =
             reflect(in.direction().normalize(), rec.n);
         out = ray(rec.p, reflected);
         attenuation = color(1, 1, 1, 1);
     } else {
         out = ray(rec.p, refracted);
-        double t_inside = (rec.p - out.origin()).length();
-        double absorption = std::exp(-absorption_strength_ * t_inside);
+        float t_inside = (rec.p - out.origin()).length();
+        float absorption = std::exp(-absorption_strength_ * t_inside);
         attenuation = color(
             attenuation_.r * absorption, attenuation_.g * absorption,
             attenuation_.b * absorption, 1);
@@ -235,21 +233,21 @@ color dielectric::specular_color(
     return color::white();
 }
 
-double dielectric::specular_strength(
+float dielectric::specular_strength(
     const hit_record& rec, const euclidean_coordinate& view_dir) const {
-    double cos_theta = std::abs(rec.n.dot(view_dir));
-    double eta = 1.0 / refraction_index_;
-    double reflectance = schlick(cos_theta, eta);
+    float cos_theta = std::abs(rec.n.dot(view_dir));
+    float eta = 1.0f / refraction_index_;
+    float reflectance = schlick(cos_theta, eta);
     return reflectance;
 }
 
-double dielectric::shininess(const hit_record& rec) const {
-    return 200.0;
+float dielectric::shininess(const hit_record& rec) const {
+    return 200.0f;
 }
-double dielectric::schlick(double cosine, double ri) {
-    double r0 = (1 - ri) / (1 + ri);
+float dielectric::schlick(float cosine, float ri) {
+    float r0 = (1 - ri) / (1 + ri);
     r0 = r0 * r0;
-    return r0 + (1 - r0) * std::pow(1 - cosine, 5);
+    return r0 + (1 - r0) * std::powf(1 - cosine, 5);
 }
 
 }  // namespace chrray

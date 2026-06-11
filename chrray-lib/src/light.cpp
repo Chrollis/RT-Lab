@@ -4,9 +4,9 @@ namespace chrray {
 point_light::point_light(
     const euclidean_coordinate& position,
     const color& intensity,
-    double constant_atten,
-    double linear_atten,
-    double quad_atten)
+    float constant_atten,
+    float linear_atten,
+    float quad_atten)
     : position_(position),
       intensity_(intensity),
       const_atten_(constant_atten),
@@ -17,14 +17,14 @@ euclidean_coordinate point_light::direction(
     const euclidean_coordinate& hit_point) const {
     return (position_ - hit_point).normalize();
 }
-double point_light::distance(const euclidean_coordinate& hit_point) const {
+float point_light::distance(const euclidean_coordinate& hit_point) const {
     return (position_ - hit_point).length();
 }
 color point_light::intensity(const euclidean_coordinate& hit_point) const {
-    double d = distance(hit_point);
-    double att = const_atten_ + lin_atten_ * d + quad_atten_ * d * d;
-    if (att == 0.0) return intensity_;
-    return intensity_ * (1.0 / att);
+    float d = distance(hit_point);
+    float att = const_atten_ + lin_atten_ * d + quad_atten_ * d * d;
+    if (att == 0.0f) return intensity_;
+    return intensity_ * (1.0f / att);
 }
 ray point_light::shadow_ray(const euclidean_coordinate& hit_point) const {
     euclidean_coordinate dir = direction(hit_point);
@@ -39,8 +39,7 @@ euclidean_coordinate directional_light::direction(
     const euclidean_coordinate& hit_point) const {
     return direction_;
 }
-double directional_light::distance(
-    const euclidean_coordinate& hit_point) const {
+float directional_light::distance(const euclidean_coordinate& hit_point) const {
     return inf;
 }
 color directional_light::intensity(

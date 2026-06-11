@@ -3,44 +3,39 @@
 #include <stdexcept>
 
 namespace chrray {
-euclidean_coordinate::euclidean_coordinate() : container_(3, 0) {}
-euclidean_coordinate::euclidean_coordinate(std::initializer_list<double> values)
-    : container_(values) {
+euclidean_coordinate::euclidean_coordinate() : container_{0, 0, 0} {}
+euclidean_coordinate::euclidean_coordinate(
+    std::initializer_list<float> values) {
     if (container_.size() != 3) {
         throw std::invalid_argument(
             "Euclidean coordinate must have 3 components");
     }
+    std::copy(values.begin(), values.end(), container_.begin());
 }
-euclidean_coordinate::euclidean_coordinate(double x, double y, double z)
+euclidean_coordinate::euclidean_coordinate(float x, float y, float z)
     : container_{x, y, z} {}
-double& euclidean_coordinate::operator[](size_t index) {
-    if (index >= 3) {
-        throw std::out_of_range("Index out of range for euclidean coordinate");
-    }
+float& euclidean_coordinate::operator[](size_t index) {
     return container_[index];
 }
-const double& euclidean_coordinate::operator[](size_t index) const {
-    if (index >= 3) {
-        throw std::out_of_range("Index out of range for euclidean coordinate");
-    }
+const float& euclidean_coordinate::operator[](size_t index) const {
     return container_[index];
 }
-double& euclidean_coordinate::rx() {
+float& euclidean_coordinate::rx() {
     return container_[0];
 }
-double euclidean_coordinate::x() const {
+float euclidean_coordinate::x() const {
     return container_[0];
 }
-double& euclidean_coordinate::ry() {
+float& euclidean_coordinate::ry() {
     return container_[1];
 }
-double euclidean_coordinate::y() const {
+float euclidean_coordinate::y() const {
     return container_[1];
 }
-double& euclidean_coordinate::rz() {
+float& euclidean_coordinate::rz() {
     return container_[2];
 }
-double euclidean_coordinate::z() const {
+float euclidean_coordinate::z() const {
     return container_[2];
 }
 euclidean_coordinate euclidean_coordinate::operator+(
@@ -57,18 +52,18 @@ euclidean_coordinate euclidean_coordinate::operator-(
         container_[1] - other.container_[1],
         container_[2] - other.container_[2]);
 }
-euclidean_coordinate euclidean_coordinate::operator*(double scalar) const {
+euclidean_coordinate euclidean_coordinate::operator*(float scalar) const {
     return euclidean_coordinate(
         container_[0] * scalar, container_[1] * scalar, container_[2] * scalar);
 }
-euclidean_coordinate euclidean_coordinate::operator/(double scalar) const {
+euclidean_coordinate euclidean_coordinate::operator/(float scalar) const {
     if (scalar == 0) {
         throw std::invalid_argument("Division by zero");
     }
     return euclidean_coordinate(
         container_[0] / scalar, container_[1] / scalar, container_[2] / scalar);
 }
-double euclidean_coordinate::dot(const euclidean_coordinate& other) const {
+float euclidean_coordinate::dot(const euclidean_coordinate& other) const {
     return container_[0] * other.container_[0] +
            container_[1] * other.container_[1] +
            container_[2] * other.container_[2];
@@ -83,13 +78,13 @@ euclidean_coordinate euclidean_coordinate::cross(
         container_[0] * other.container_[1] -
             container_[1] * other.container_[0]);
 }
-double euclidean_coordinate::length() const {
-    return std::sqrt(
+float euclidean_coordinate::length() const {
+    return std::sqrtf(
         container_[0] * container_[0] + container_[1] * container_[1] +
         container_[2] * container_[2]);
 }
 euclidean_coordinate euclidean_coordinate::normalize() const {
-    double len = length();
+    float len = length();
     if (len == 0) {
         throw std::invalid_argument("Cannot normalize a zero-length vector");
     }
@@ -102,7 +97,7 @@ homogeneous_coordinate euclidean_coordinate::homogenize() const {
 euclidean_coordinate euclidean_coordinate::operator-() const {
     return euclidean_coordinate(-container_[0], -container_[1], -container_[2]);
 }
-euclidean_coordinate operator*(double scalar, const euclidean_coordinate& vec) {
+euclidean_coordinate operator*(float scalar, const euclidean_coordinate& vec) {
     return euclidean_coordinate(
         vec.container_[0] * scalar, vec.container_[1] * scalar,
         vec.container_[2] * scalar);
@@ -112,53 +107,47 @@ bool euclidean_coordinate::operator==(const euclidean_coordinate& other) const {
            container_[1] == other.container_[1] &&
            container_[2] == other.container_[2];
 }
+
+homogeneous_coordinate::homogeneous_coordinate() : container_{0, 0, 0, 0} {}
 homogeneous_coordinate::homogeneous_coordinate(
-    std::initializer_list<double> values)
-    : container_(values) {
+    std::initializer_list<float> values) {
     if (container_.size() != 4) {
         throw std::invalid_argument(
             "Homogeneous coordinate must have 4 components");
     }
+    std::copy(values.begin(), values.end(), container_.begin());
 }
 homogeneous_coordinate::homogeneous_coordinate(
-    double x, double y, double z, double w)
+    float x, float y, float z, float w)
     : container_{x, y, z, w} {}
-double& homogeneous_coordinate::operator[](size_t index) {
-    if (index >= 4) {
-        throw std::out_of_range(
-            "Index out of range for homogeneous coordinate");
-    }
+float& homogeneous_coordinate::operator[](size_t index) {
     return container_[index];
 }
-const double& homogeneous_coordinate::operator[](size_t index) const {
-    if (index >= 4) {
-        throw std::out_of_range(
-            "Index out of range for homogeneous coordinate");
-    }
+const float& homogeneous_coordinate::operator[](size_t index) const {
     return container_[index];
 }
-double& homogeneous_coordinate::rx() {
+float& homogeneous_coordinate::rx() {
     return container_[0];
 }
-double homogeneous_coordinate::x() const {
+float homogeneous_coordinate::x() const {
     return container_[0];
 }
-double& homogeneous_coordinate::ry() {
+float& homogeneous_coordinate::ry() {
     return container_[1];
 }
-double homogeneous_coordinate::y() const {
+float homogeneous_coordinate::y() const {
     return container_[1];
 }
-double& homogeneous_coordinate::rz() {
+float& homogeneous_coordinate::rz() {
     return container_[2];
 }
-double homogeneous_coordinate::z() const {
+float homogeneous_coordinate::z() const {
     return container_[2];
 }
-double& homogeneous_coordinate::rw() {
+float& homogeneous_coordinate::rw() {
     return container_[3];
 }
-double homogeneous_coordinate::w() const {
+float homogeneous_coordinate::w() const {
     return container_[3];
 }
 homogeneous_coordinate homogeneous_coordinate::operator+(
@@ -177,12 +166,12 @@ homogeneous_coordinate homogeneous_coordinate::operator-(
         container_[2] - other.container_[2],
         container_[3] - other.container_[3]);
 }
-homogeneous_coordinate homogeneous_coordinate::operator*(double scalar) const {
+homogeneous_coordinate homogeneous_coordinate::operator*(float scalar) const {
     return homogeneous_coordinate(
         container_[0] * scalar, container_[1] * scalar, container_[2] * scalar,
         container_[3] * scalar);
 }
-homogeneous_coordinate homogeneous_coordinate::operator/(double scalar) const {
+homogeneous_coordinate homogeneous_coordinate::operator/(float scalar) const {
     if (scalar == 0) {
         throw std::invalid_argument("Division by zero");
     }
@@ -190,19 +179,19 @@ homogeneous_coordinate homogeneous_coordinate::operator/(double scalar) const {
         container_[0] / scalar, container_[1] / scalar, container_[2] / scalar,
         container_[3] / scalar);
 }
-double homogeneous_coordinate::dot(const homogeneous_coordinate& other) const {
+float homogeneous_coordinate::dot(const homogeneous_coordinate& other) const {
     return container_[0] * other.container_[0] +
            container_[1] * other.container_[1] +
            container_[2] * other.container_[2] +
            container_[3] * other.container_[3];
 }
-double homogeneous_coordinate::length() const {
-    return std::sqrt(
+float homogeneous_coordinate::length() const {
+    return std::sqrtf(
         container_[0] * container_[0] + container_[1] * container_[1] +
         container_[2] * container_[2] + container_[3] * container_[3]);
 }
 homogeneous_coordinate homogeneous_coordinate::normalize() const {
-    double len = length();
+    float len = length();
     if (len == 0) {
         throw std::invalid_argument("Cannot normalize a zero-length vector");
     }
@@ -222,7 +211,7 @@ homogeneous_coordinate homogeneous_coordinate::operator-() const {
         -container_[0], -container_[1], -container_[2], -container_[3]);
 }
 homogeneous_coordinate operator*(
-    double scalar, const homogeneous_coordinate& vec) {
+    float scalar, const homogeneous_coordinate& vec) {
     return homogeneous_coordinate(
         vec.container_[0] * scalar, vec.container_[1] * scalar,
         vec.container_[2] * scalar, vec.container_[3] * scalar);
@@ -235,49 +224,43 @@ bool homogeneous_coordinate::operator==(
            container_[3] == other.container_[3];
 }
 
-quaternion::quaternion() : container_(4, 0) {}
-quaternion::quaternion(std::initializer_list<double> values)
-    : container_(values) {
+quaternion::quaternion() : container_{0, 0, 0, 0} {}
+quaternion::quaternion(std::initializer_list<float> values) {
     if (container_.size() != 4) {
         throw std::invalid_argument("Quaternion must have 4 components");
     }
+    std::copy(values.begin(), values.end(), container_.begin());
 }
-quaternion::quaternion(double x, double y, double z, double w)
+quaternion::quaternion(float x, float y, float z, float w)
     : container_{x, y, z, w} {}
-double& quaternion::operator[](size_t index) {
-    if (index >= 4) {
-        throw std::out_of_range("Index out of range for quaternion");
-    }
+float& quaternion::operator[](size_t index) {
     return container_[index];
 }
-const double& quaternion::operator[](size_t index) const {
-    if (index >= 4) {
-        throw std::out_of_range("Index out of range for quaternion");
-    }
+const float& quaternion::operator[](size_t index) const {
     return container_[index];
 }
-double& quaternion::rx() {
+float& quaternion::rx() {
     return container_[0];
 }
-double quaternion::x() const {
+float quaternion::x() const {
     return container_[0];
 }
-double& quaternion::ry() {
+float& quaternion::ry() {
     return container_[1];
 }
-double quaternion::y() const {
+float quaternion::y() const {
     return container_[1];
 }
-double& quaternion::rz() {
+float& quaternion::rz() {
     return container_[2];
 }
-double quaternion::z() const {
+float quaternion::z() const {
     return container_[2];
 }
-double& quaternion::rw() {
+float& quaternion::rw() {
     return container_[3];
 }
-double quaternion::w() const {
+float quaternion::w() const {
     return container_[3];
 }
 quaternion quaternion::operator*(const quaternion& other) const {
@@ -303,13 +286,13 @@ quaternion quaternion::conjugate() const {
     return quaternion(
         -container_[0], -container_[1], -container_[2], container_[3]);
 }
-double quaternion::length() const {
-    return std::sqrt(
+float quaternion::length() const {
+    return std::sqrtf(
         container_[0] * container_[0] + container_[1] * container_[1] +
         container_[2] * container_[2] + container_[3] * container_[3]);
 }
 quaternion quaternion::normalize() const {
-    double len = length();
+    float len = length();
     if (len == 0) {
         throw std::invalid_argument(
             "Cannot normalize a zero-length quaternion");
@@ -326,13 +309,13 @@ euclidean_coordinate quaternion::rotate_vector(
     return euclidean_coordinate(rotated.x(), rotated.y(), rotated.z());
 }
 quaternion quaternion::from_axis_angle(
-    const euclidean_coordinate& axis, double angle) {
+    const euclidean_coordinate& axis, float angle) {
     euclidean_coordinate normalized_axis = axis.normalize();
-    double half_angle = angle * 0.5;
-    double sin_half = std::sin(half_angle);
+    float half_angle = angle * 0.5f;
+    float sin_half = std::sinf(half_angle);
     return quaternion(
         normalized_axis.x() * sin_half, normalized_axis.y() * sin_half,
-        normalized_axis.z() * sin_half, std::cos(half_angle));
+        normalized_axis.z() * sin_half, std::cosf(half_angle));
 }
 bool quaternion::operator==(const quaternion& other) const {
     return container_[0] == other.container_[0] &&
@@ -341,14 +324,10 @@ bool quaternion::operator==(const quaternion& other) const {
            container_[3] == other.container_[3];
 }
 
-homogeneous_transform::homogeneous_transform() : container_(16, 0) {
-    for (size_t i = 0; i < 4; ++i) {
-        container_[i * 4 + i] = 1;
-    }
-}
+homogeneous_transform::homogeneous_transform()
+    : container_{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1} {}
 homogeneous_transform::homogeneous_transform(
-    std::initializer_list<std::initializer_list<double>> values)
-    : container_(16, 0) {
+    std::initializer_list<std::initializer_list<float>> values) {
     if (values.size() != 4) {
         throw std::invalid_argument("Homogeneous transform must be 4x4");
     }
@@ -358,35 +337,23 @@ homogeneous_transform::homogeneous_transform(
             throw std::invalid_argument("Homogeneous transform must be 4x4");
         }
         size_t col = 0;
-        for (double value : row_values) {
+        for (float value : row_values) {
             container_[row * 4 + col] = value;
             ++col;
         }
         ++row;
     }
 }
-double& homogeneous_transform::operator()(size_t row, size_t col) {
-    if (row >= 4 || col >= 4) {
-        throw std::out_of_range("Index out of range for homogeneous transform");
-    }
+float& homogeneous_transform::operator()(size_t row, size_t col) {
     return container_[row * 4 + col];
 }
-const double& homogeneous_transform::operator()(size_t row, size_t col) const {
-    if (row >= 4 || col >= 4) {
-        throw std::out_of_range("Index out of range for homogeneous transform");
-    }
+const float& homogeneous_transform::operator()(size_t row, size_t col) const {
     return container_[row * 4 + col];
 }
-double& homogeneous_transform::operator[](size_t index) {
-    if (index >= 16) {
-        throw std::out_of_range("Index out of range for homogeneous transform");
-    }
+float& homogeneous_transform::operator[](size_t index) {
     return container_[index];
 }
-const double& homogeneous_transform::operator[](size_t index) const {
-    if (index >= 16) {
-        throw std::out_of_range("Index out of range for homogeneous transform");
-    }
+const float& homogeneous_transform::operator[](size_t index) const {
     return container_[index];
 }
 homogeneous_transform homogeneous_transform::operator*(
@@ -394,7 +361,7 @@ homogeneous_transform homogeneous_transform::operator*(
     homogeneous_transform result;
     for (size_t row = 0; row < 4; ++row) {
         for (size_t col = 0; col < 4; ++col) {
-            double value = 0;
+            float value = 0;
             for (size_t k = 0; k < 4; ++k) {
                 value += (*this)(row, k) * other(k, col);
             }
@@ -432,14 +399,14 @@ homogeneous_transform homogeneous_transform::scaling(
     return result;
 }
 homogeneous_transform homogeneous_transform::rotation(
-    const euclidean_coordinate& axis, double angle) {
+    const euclidean_coordinate& axis, float angle) {
     euclidean_coordinate normalized_axis = axis.normalize();
-    double x = normalized_axis.x();
-    double y = normalized_axis.y();
-    double z = normalized_axis.z();
-    double c = std::cos(angle);
-    double s = std::sin(angle);
-    double one_minus_c = 1 - c;
+    float x = normalized_axis.x();
+    float y = normalized_axis.y();
+    float z = normalized_axis.z();
+    float c = std::cosf(angle);
+    float s = std::sinf(angle);
+    float one_minus_c = 1 - c;
 
     homogeneous_transform result;
     result(0, 0) = c + x * x * one_minus_c;

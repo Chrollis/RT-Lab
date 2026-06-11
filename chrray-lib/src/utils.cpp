@@ -2,24 +2,24 @@
 #include <random>
 
 namespace chrray {
-static std::mt19937 rng;
-static std::uniform_real_distribution<double> dist(0.0, 1.0);
+static thread_local std::mt19937 rng;
+static thread_local std::uniform_real_distribution<float> dist(0.0f, 1.0f);
 
 void init_random() {
     rng.seed(std::random_device{}());
 }
-double random_double() {
+float random_float() {
     return dist(rng);
 }
-double random_double(double min, double max) {
+float random_float(float min, float max) {
     return min + (max - min) * dist(rng);
 }
 
 euclidean_coordinate random_in_unit_sphere() {
     while (true) {
         auto p = euclidean_coordinate(
-            random_double(-1, 1), random_double(-1, 1), random_double(-1, 1));
-        if (p.x() * p.x() + p.y() * p.y() + p.z() * p.z() < 1.0) return p;
+            random_float(-1, 1), random_float(-1, 1), random_float(-1, 1));
+        if (p.x() * p.x() + p.y() * p.y() + p.z() * p.z() < 1.0f) return p;
     }
 }
 euclidean_coordinate random_on_unit_sphere() {
@@ -27,65 +27,78 @@ euclidean_coordinate random_on_unit_sphere() {
 }
 euclidean_coordinate random_on_hemisphere(const euclidean_coordinate& normal) {
     auto on_sphere = random_on_unit_sphere();
-    if (on_sphere.dot(normal) > 0.0)
+    if (on_sphere.dot(normal) > 0.0f)
         return on_sphere;
     else
         return -on_sphere;
 }
 euclidean_coordinate random_cosine_direction() {
-    double r1 = random_double(), r2 = random_double();
-    double phi = 2.0 * pi * r1;
-    double cos_theta = sqrt(r2), sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+    float r1 = random_float(), r2 = random_float();
+    float phi = 2.0f * pi * r1;
+    float cos_theta = sqrtf(r2),
+          sin_theta = sqrtf(1.0f - cos_theta * cos_theta);
     return euclidean_coordinate(
-        sin_theta * cos(phi), sin_theta * sin(phi), cos_theta);
+        sin_theta * cosf(phi), sin_theta * sinf(phi), cos_theta);
 }
 
 euclidean_coordinate reflect(
     const euclidean_coordinate& v, const euclidean_coordinate& n) {
-    return v - 2.0 * v.dot(n) * n;
+    return v - 2.0f * v.dot(n) * n;
 }
 bool refract(
     const euclidean_coordinate& v,
     const euclidean_coordinate& n,
-    double ni_over_nt,
+    float ni_over_nt,
     euclidean_coordinate& refracted) {
-    double dt = v.dot(n);
-    double discriminant = 1.0 - ni_over_nt * ni_over_nt * (1.0 - dt * dt);
-    if (discriminant > 0.0) {
-        refracted = ni_over_nt * (v - n * dt) - sqrt(discriminant) * n;
+    float dt = v.dot(n);
+    float discriminant = 1.0f - ni_over_nt * ni_over_nt * (1.0f - dt * dt);
+    if (discriminant > 0.0f) {
+        refracted = ni_over_nt * (v - n * dt) - sqrtf(discriminant) * n;
         return true;
     }
     return false;
 }
-double schlick(double cosine, double refraction_index) {
-    double r0 = (1.0 - refraction_index) / (1.0 + refraction_index);
+float schlick(float cosine, float refraction_index) {
+    float r0 = (1.0f - refraction_index) / (1.0f + refraction_index);
     r0 = r0 * r0;
-    return r0 + (1.0 - r0) * pow(1.0 - cosine, 5.0);
+    return r0 + (1.0f - r0) * powf(1.0f - cosine, 5.0f);
 }
 
 aabb::aabb() : min(0, 0, 0), max(0, 0, 0) {}
 aabb::aabb(const euclidean_coordinate& a, const euclidean_coordinate& b)
     : min(a), max(b) {}
-bool aabb::hit(
+bool aabb::hit_interval(
     const euclidean_coordinate& origin,
     const euclidean_coordinate& dir,
-    double t_min,
-    double t_max) const {
-    double t0 = t_min, t1 = t_max;
-    for (int i = 0; i < 3; i++) {
-        double inv_d = 1.0 / dir[i];
-        double t_near = inv_d * (min[i] - origin[i]);
-        double t_far = inv_d * (max[i] - origin[i]);
-        if (inv_d < 0.0) std::swap(t_near, t_far);
+    float t_min,
+    float t_max,
+    float& t_entry,
+    float& t_exit) const {
+    float t0 = t_min, t1 = t_max;
+    for (int i = 0; i < 3; ++i) {
+        float inv_d = 1.0f / dir[i];
+        float t_near = inv_d * (min[i] - origin[i]);
+        float t_far = inv_d * (max[i] - origin[i]);
+        if (inv_d < 0.0f) std::swap(t_near, t_far);
         t0 = std::max(t_near, t0);
         t1 = std::min(t_far, t1);
         if (t0 > t1) return false;
     }
+    t_entry = t0;
+    t_exit = t1;
     return true;
 }
-double aabb::surface_area() const {
+bool aabb::hit(
+    const euclidean_coordinate& origin,
+    const euclidean_coordinate& dir,
+    float t_min,
+    float t_max) const {
+    float temp0 = 0.0f, temp1 = 0.0f;
+    return hit_interval(origin, dir, t_min, t_max, temp0, temp1);
+}
+float aabb::surface_area() const {
     auto dp = max - min;
-    return 2.0 * (dp.x() * dp.y() + dp.y() * dp.z() + dp.z() * dp.x());
+    return 2.0f * (dp.x() * dp.y() + dp.y() * dp.z() + dp.z() * dp.x());
 }
 aabb surrounding_box(const aabb& box0, const aabb& box1) {
     euclidean_coordinate min(
@@ -102,9 +115,9 @@ euclidean_coordinate barycentric_interpolate(
     const euclidean_coordinate& v0,
     const euclidean_coordinate& v1,
     const euclidean_coordinate& v2,
-    double u,
-    double v) {
-    double w = 1.0 - u - v;
+    float u,
+    float v) {
+    float w = 1.0f - u - v;
     return v0 * w + v1 * u + v2 * v;
 }
 }  // namespace chrray

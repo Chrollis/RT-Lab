@@ -3,6 +3,7 @@
 #include <utils.h>
 #include <filesystem>
 #include <memory>
+#include <vector>
 
 namespace chrray {
 class ray {
@@ -14,7 +15,7 @@ public:
     const euclidean_coordinate& origin() const;
     const euclidean_coordinate& direction() const;
 
-    euclidean_coordinate at(double t) const;
+    euclidean_coordinate at(float t) const;
 
 private:
     euclidean_coordinate origin_;
@@ -24,11 +25,11 @@ private:
 class material;
 
 struct hit_record {
-    double t;
+    float t;
     euclidean_coordinate p;
     euclidean_coordinate n;
     std::shared_ptr<material> mat;
-    double u, v;
+    float u, v;
     hit_record();
 };
 
@@ -36,26 +37,24 @@ class hittable {
 public:
     virtual ~hittable() = default;
     virtual bool intersect(
-        const ray& r, double t_min, double t_max, hit_record& rec) const = 0;
+        const ray& r, float t_min, float t_max, hit_record& rec) const = 0;
     virtual aabb bounding_box() const = 0;
+    virtual bool any_hit(const ray& r, float t_min, float t_max) const;
 };
 
 class sphere : public hittable {
 public:
     sphere(
         const euclidean_coordinate& center,
-        double radius,
+        float radius,
         std::shared_ptr<material> mat);
     virtual bool intersect(
-        const ray& r,
-        double t_min,
-        double t_max,
-        hit_record& rec) const override;
+        const ray& r, float t_min, float t_max, hit_record& rec) const override;
     virtual aabb bounding_box() const override;
 
 private:
     euclidean_coordinate center_;
-    double radius_;
+    float radius_;
     std::shared_ptr<material> mat_;
 };
 
@@ -67,10 +66,7 @@ public:
         const euclidean_coordinate& v2,
         std::shared_ptr<material> mat);
     virtual bool intersect(
-        const ray& r,
-        double t_min,
-        double t_max,
-        hit_record& rec) const override;
+        const ray& r, float t_min, float t_max, hit_record& rec) const override;
     virtual aabb bounding_box() const override;
 
 private:
@@ -86,10 +82,7 @@ public:
         const euclidean_coordinate& normal,
         std::shared_ptr<material> mat);
     virtual bool intersect(
-        const ray& r,
-        double t_min,
-        double t_max,
-        hit_record& rec) const override;
+        const ray& r, float t_min, float t_max, hit_record& rec) const override;
     virtual aabb bounding_box() const override;
 
 private:
@@ -102,10 +95,7 @@ class mesh : public hittable {
 public:
     mesh(const std::filesystem::path& filepath, std::shared_ptr<material> mat);
     virtual bool intersect(
-        const ray& r,
-        double t_min,
-        double t_max,
-        hit_record& rec) const override;
+        const ray& r, float t_min, float t_max, hit_record& rec) const override;
     virtual aabb bounding_box() const override;
 
 private:
