@@ -33,6 +33,12 @@ color color::gamma_correct(float gamma) const {
     float inv = 1.0f / gamma;
     return color(powf(r, inv), powf(g, inv), powf(b, inv), a);
 }
+color color::tonemap() const {
+    float luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
+    float mapped_luminance = luminance / (1.0f + luminance);
+    float scale = mapped_luminance / (luminance + 1e-6f);
+    return color(r * scale, g * scale, b * scale, a);
+}
 color blend(const color& c1, const color& c2) {
     return color(
         c1.r * c1.a + c2.r * c2.a * (1.0f - c1.a),

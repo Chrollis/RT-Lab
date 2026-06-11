@@ -50,7 +50,7 @@ bool sphere::intersect(
     rec.t = t;
     rec.p = r.at(t);
     rec.n = (rec.p - center_) / radius_;
-    if (rec.n.dot(r.direction()) > 0) {
+    if (rec.n.dot(r.direction()) > eps) {
         rec.n = rec.n * (-1.0f);
     }
     rec.mat = mat_;
@@ -145,7 +145,7 @@ bool plane::intersect(
     return true;
 }
 aabb plane::bounding_box() const {
-    const float half_size = 50;
+    const float half_size = 1e4;
     return aabb(
         euclidean_coordinate(-half_size, -half_size, -half_size),
         euclidean_coordinate(half_size, half_size, half_size));

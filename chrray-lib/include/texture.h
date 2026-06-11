@@ -16,6 +16,7 @@ struct color {
     friend color operator*(float t, const color& c);
 
     color gamma_correct(float gamma) const;
+    color tonemap() const;
     friend color blend(const color& c1, const color& c2);
     COLORREF to_colorref(COLORREF bg) const;
 

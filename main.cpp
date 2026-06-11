@@ -16,18 +16,23 @@
 
 using namespace chrray;
 
-const int WIDTH = 1600;
+const int WIDTH = 1200;
 const int HEIGHT = 900;
-const int MIN_DEPTH = 8;
+int REAL_WIDTH = 400;
+int REAL_HEIGHT = 300;
+int RENDER_SCALE = 3;
+
+const int MIN_DEPTH = 4;
 const float SURVIVAL = 0.8f;
-const int MAX_DEPTH = 16;
-const int NUM_OBJECTS = 200;
+const int MAX_DEPTH = 8;
+int NUM_OBJECTS = 100;
 const color BACKGROUND_COLOR(0.1f, 0.15f, 0.25f, 1.0f);
+int SAMPLES_PER_PIXEL = 4;
 
 std::vector<std::shared_ptr<hittable>> world;
 std::vector<std::shared_ptr<light>> lights;
 std::shared_ptr<bvh_node> bvh_root;
-bool use_bvh = false;
+bool use_bvh = true;
 
 camera cam(
     euclidean_coordinate(0, 10, 25),
@@ -113,10 +118,8 @@ color ray_color(const ray& r, int depth) {
     color ambient = rec.mat->diffuse_color(rec, view_dir) * 0.1f;
 
     color scattered_color(0, 0, 0, 1);
-    if (depth < MAX_DEPTH) {
-        if (depth > MIN_DEPTH && random_float() > SURVIVAL) {
-            return ambient + direct;
-        }
+    if (depth < MAX_DEPTH &&
+        !(depth > MIN_DEPTH && random_float() > SURVIVAL)) {
         ray scattered;
         color attenuation;
         if (rec.mat->scatter(r, rec, attenuation, scattered)) {
@@ -125,34 +128,43 @@ color ray_color(const ray& r, int depth) {
     }
 
     color emitted = rec.mat->emitted(rec);
-
     color final = ambient + direct + scattered_color + emitted;
     return final;
 }
 
 void render() {
-    std::vector<color> framebuffer(WIDTH * HEIGHT);
-#pragma omp parallel for schedule(dynamic, 16)
-    for (int idx = 0; idx < WIDTH * HEIGHT; ++idx) {
-        int x = idx % WIDTH;
-        int y = idx / WIDTH;
-        float u = float(x) / (WIDTH - 1);
-        float v = float(y) / (HEIGHT - 1);
-        ray r = cam.get_ray(u, v);
-        color col = ray_color(r, 0);
-        col = col.gamma_correct(2.2f);
-        framebuffer[idx] = col;
-    }
+    std::vector<color> framebuffer(REAL_WIDTH * REAL_HEIGHT);
+    float w_inv = 1.0f / REAL_WIDTH;
+    float h_inv = 1.0f / REAL_HEIGHT;
+    float s_inv = 1.0f / SAMPLES_PER_PIXEL;
 
-    BeginBatchDraw();
-    for (int y = 0; y < HEIGHT; ++y) {
-        for (int x = 0; x < WIDTH; ++x) {
-            const color& col = framebuffer[y * WIDTH + x];
-            putpixel(
-                x, y,
-                RGB(int(col.r * 255), int(col.g * 255), int(col.b * 255)));
+#pragma omp parallel for schedule(static)
+    for (int idx = 0; idx < REAL_WIDTH * REAL_HEIGHT; ++idx) {
+        int x = idx % REAL_WIDTH;
+        int y = idx / REAL_WIDTH;
+        float pr = 0, pg = 0, pb = 0, pa = 0;
+        for (int s = 0; s < SAMPLES_PER_PIXEL; ++s) {
+            float u = (x + random_float()) * w_inv;
+            float v = (y + random_float()) * h_inv;
+            ray r = cam.get_ray(u, v);
+            color rc = ray_color(r, 0);
+            pr += rc.r;
+            pg += rc.g;
+            pb += rc.b;
+            pa += rc.a;
         }
-        if (y % 20 == 0) FlushBatchDraw();
+        color pixel_color(pr * s_inv, pg * s_inv, pb * s_inv, pa * s_inv);
+        framebuffer[idx] = pixel_color.gamma_correct(2.2f);
+    }
+    BeginBatchDraw();
+
+    for (int y = 0; y < HEIGHT; ++y) {
+        int src_y = y * REAL_HEIGHT / HEIGHT;
+        for (int x = 0; x < WIDTH; ++x) {
+            int src_x = x * REAL_WIDTH / WIDTH;
+            const color& col = framebuffer[src_y * REAL_WIDTH + src_x];
+            putpixel(x, y, col.to_colorref(BLACK));
+        }
     }
     EndBatchDraw();
 }
@@ -201,9 +213,7 @@ void build_scene() {
 
     for (int i = 0; i < NUM_OBJECTS; ++i) {
         euclidean_coordinate center(pos_dist(rng), y_dist(rng), pos_dist(rng));
-
         float scale = size_dist(rng);
-
         auto mat = choose_material();
         world.push_back(std::make_shared<sphere>(center, scale, mat));
     }
@@ -284,8 +294,30 @@ void handle_input(ExMessage& msg) {
     }
 }
 
-int main() {
-    omp_set_num_threads(8);
+int main(int argc, char** argv) {
+    if (argc >= 2) {
+        RENDER_SCALE = std::atoi(argv[1]);
+        if (RENDER_SCALE < 1) RENDER_SCALE = 1;
+        REAL_WIDTH = WIDTH / RENDER_SCALE;
+        REAL_HEIGHT = HEIGHT / RENDER_SCALE;
+        if (REAL_WIDTH < 1) REAL_WIDTH = 1;
+        if (REAL_HEIGHT < 1) REAL_HEIGHT = 1;
+    }
+    if (argc >= 3) {
+        NUM_OBJECTS = std::atoi(argv[2]);
+    }
+    if (argc >= 4) {
+        SAMPLES_PER_PIXEL = std::atoi(argv[3]);
+    }
+    if (NUM_OBJECTS <= 0) NUM_OBJECTS = 100;
+    if (SAMPLES_PER_PIXEL < 1) SAMPLES_PER_PIXEL = 1;
+
+    cam = camera(
+        euclidean_coordinate(0, 10, 25), euclidean_coordinate(0, 5, 0),
+        euclidean_coordinate(0, 1, 0), 60.0f, float(REAL_WIDTH) / REAL_HEIGHT,
+        0.1f, 100.0f);
+
+    omp_set_num_threads(omp_get_max_threads());
 
     initgraph(WIDTH, HEIGHT);
     setbkcolor(RGB(0, 0, 0));
@@ -311,10 +343,11 @@ int main() {
         auto now = std::chrono::steady_clock::now();
         float elapsed = std::chrono::duration<float>(now - last_time).count();
         if (elapsed >= 1.0f) {
-            char title[64];
+            char title[128];
             snprintf(
-                title, 64, "Ray Tracer - SPF: %.2f | BVH: %s", elapsed,
-                use_bvh ? "ON" : "OFF");
+                title, sizeof(title),
+                "Ray Tracer - SPF: %.2f | BVH: %s | SCALE: %d", elapsed,
+                use_bvh ? "ON" : "OFF", RENDER_SCALE);
             SetWindowText(GetHWnd(), title);
             last_time = now;
         }

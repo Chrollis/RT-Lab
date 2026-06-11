@@ -1,18 +1,29 @@
 #include <utils.h>
-#include <random>
+#include <chrono>
 
 namespace chrray {
-static thread_local std::mt19937 rng;
-static thread_local std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+static thread_local uint32_t x = 123456789;
+static thread_local uint32_t y = 362436069;
+static thread_local uint32_t z = 521288629;
+static thread_local uint32_t w = 88675123;
 
 void init_random() {
-    rng.seed(std::random_device{}());
+    x = static_cast<uint32_t>(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+}
+uint32_t xorshift() {
+    uint32_t t = x ^ (x << 11);
+    x = y;
+    y = z;
+    z = w;
+    w = w ^ (w >> 19) ^ t ^ (t >> 8);
+    return w;
 }
 float random_float() {
-    return dist(rng);
+    return xorshift() / 4294967296.0f;
 }
 float random_float(float min, float max) {
-    return min + (max - min) * dist(rng);
+    return min + (max - min) * random_float();
 }
 
 euclidean_coordinate random_in_unit_sphere() {

@@ -52,65 +52,62 @@ bool bvh_node::intersect(
 
 bool bvh_node::intersect_node(
     const ray& r, float t_min, float t_max, hit_record& rec) const {
-    if (!left_ && !right_) {
-        bool hit = false;
-        float closest = t_max;
-        for (const auto& obj : leaf_objects_) {
-            if (obj->intersect(r, t_min, closest, rec)) {
-                hit = true;
-                closest = rec.t;
-            }
-        }
-        return hit;
-    }
-
-    float t_left_entry = t_min, t_left_exit = t_max;
-    float t_right_entry = t_min, t_right_exit = t_max;
-    bool hit_left_box = left_ ? left_->box_.hit_interval(
-                                    r.origin(), r.direction(), t_min, t_max,
-                                    t_left_entry, t_left_exit)
-                              : false;
-    bool hit_right_box = right_ ? right_->box_.hit_interval(
-                                      r.origin(), r.direction(), t_min, t_max,
-                                      t_right_entry, t_right_exit)
-                                : false;
-
-    const bvh_node* first = nullptr;
-    const bvh_node* second = nullptr;
-    if (hit_left_box && hit_right_box) {
-        if (t_left_entry < t_right_entry) {
-            first = left_.get();
-            second = right_.get();
-        } else {
-            first = right_.get();
-            second = left_.get();
-        }
-    } else if (hit_left_box) {
-        first = left_.get();
-    } else if (hit_right_box) {
-        first = right_.get();
-    } else {
-        return false;
-    }
+    struct Item {
+        const bvh_node* node;
+        float t_min;
+        float t_max;
+    };
+    std::vector<Item> stack;
+    stack.reserve(64);
+    stack.push_back({this, t_min, t_max});
 
     bool hit = false;
-    if (first) {
-        if (first->intersect_node(r, t_min, t_max, rec)) {
-            hit = true;
-            t_max = rec.t;
-        }
-    }
+    while (!stack.empty()) {
+        Item item = stack.back();
+        stack.pop_back();
+        const bvh_node* node = item.node;
 
-    if (second) {
-        float second_entry =
-            (second == left_.get()) ? t_left_entry : t_right_entry;
-        if (!hit || second_entry < t_max) {
-            hit_record rec2;
-            if (second->intersect_node(r, t_min, t_max, rec2)) {
-                if (!hit || rec2.t < rec.t) {
-                    rec = rec2;
+        if (!node->box_.hit(r.origin(), r.direction(), item.t_min, item.t_max))
+            continue;
+
+        if (!node->left_ && !node->right_) {
+            for (const auto& obj : node->leaf_objects_) {
+                if (obj->intersect(r, item.t_min, item.t_max, rec)) {
                     hit = true;
+                    item.t_max = rec.t;
                 }
+            }
+        } else {
+            float t_left_entry = item.t_min, t_left_exit = item.t_max;
+            float t_right_entry = item.t_min, t_right_exit = item.t_max;
+            bool hit_left = node->left_
+                                ? node->left_->box_.hit_interval(
+                                      r.origin(), r.direction(), item.t_min,
+                                      item.t_max, t_left_entry, t_left_exit)
+                                : false;
+            bool hit_right = node->right_
+                                 ? node->right_->box_.hit_interval(
+                                       r.origin(), r.direction(), item.t_min,
+                                       item.t_max, t_right_entry, t_right_exit)
+                                 : false;
+
+            if (hit_left && hit_right) {
+                if (t_left_entry < t_right_entry) {
+                    stack.push_back(
+                        {node->right_.get(), t_right_entry, t_right_exit});
+                    stack.push_back(
+                        {node->left_.get(), t_left_entry, t_left_exit});
+                } else {
+                    stack.push_back(
+                        {node->left_.get(), t_left_entry, t_left_exit});
+                    stack.push_back(
+                        {node->right_.get(), t_right_entry, t_right_exit});
+                }
+            } else if (hit_left) {
+                stack.push_back({node->left_.get(), t_left_entry, t_left_exit});
+            } else if (hit_right) {
+                stack.push_back(
+                    {node->right_.get(), t_right_entry, t_right_exit});
             }
         }
     }
