@@ -66,9 +66,15 @@ bool uniform_grid::intersect(
             (iy + (r.direction().y() > 0 ? 1 : 0)) * step_.y() + box_.min.y();
         float next_tz =
             (iz + (r.direction().z() > 0 ? 1 : 0)) * step_.z() + box_.min.z();
-        float tx = (next_tx - r.origin().x()) / r.direction().x();
-        float ty = (next_ty - r.origin().y()) / r.direction().y();
-        float tz = (next_tz - r.origin().z()) / r.direction().z();
+        float tx = (r.direction().x() != 0.0f)
+                       ? (next_tx - r.origin().x()) / r.direction().x()
+                       : inf;
+        float ty = (r.direction().y() != 0.0f)
+                       ? (next_ty - r.origin().y()) / r.direction().y()
+                       : inf;
+        float tz = (r.direction().z() != 0.0f)
+                       ? (next_tz - r.origin().z()) / r.direction().z()
+                       : inf;
         if (tx < ty && tx < tz) {
             ix += (r.direction().x() > 0 ? 1 : -1);
             t = tx;
@@ -85,8 +91,56 @@ bool uniform_grid::intersect(
     return false;
 }
 bool uniform_grid::any_hit(const ray& r, float t_min, float t_max) const {
-    hit_record rec;
-    return intersect(r, t_min, t_max, rec);
+    float tx0, tx1;
+    if (!box_.hit_interval(r.origin(), r.direction(), t_min, t_max, tx0, tx1))
+        return false;
+
+    int ix = (int)((r.at(tx0).x() - box_.min.x()) * inv_step_.x());
+    int iy = (int)((r.at(tx0).y() - box_.min.y()) * inv_step_.y());
+    int iz = (int)((r.at(tx0).z() - box_.min.z()) * inv_step_.z());
+    ix = std::clamp(ix, 0, nx_ - 1);
+    iy = std::clamp(iy, 0, ny_ - 1);
+    iz = std::clamp(iz, 0, nz_ - 1);
+
+    float t = tx0;
+
+    while (t <= tx1) {
+        for (const auto& obj : cells_[ix + nx_ * (iy + ny_ * iz)]) {
+            if (obj->any_hit(r, t_min, t_max)) return true;
+        }
+
+        float next_tx =
+            (ix + (r.direction().x() > 0 ? 1 : 0)) * step_.x() + box_.min.x();
+        float next_ty =
+            (iy + (r.direction().y() > 0 ? 1 : 0)) * step_.y() + box_.min.y();
+        float next_tz =
+            (iz + (r.direction().z() > 0 ? 1 : 0)) * step_.z() + box_.min.z();
+
+        float tx = (r.direction().x() != 0.0f)
+                       ? (next_tx - r.origin().x()) / r.direction().x()
+                       : inf;
+        float ty = (r.direction().y() != 0.0f)
+                       ? (next_ty - r.origin().y()) / r.direction().y()
+                       : inf;
+        float tz = (r.direction().z() != 0.0f)
+                       ? (next_tz - r.origin().z()) / r.direction().z()
+                       : inf;
+
+        if (tx < ty && tx < tz) {
+            ix += (r.direction().x() > 0 ? 1 : -1);
+            t = tx;
+        } else if (ty < tz) {
+            iy += (r.direction().y() > 0 ? 1 : -1);
+            t = ty;
+        } else {
+            iz += (r.direction().z() > 0 ? 1 : -1);
+            t = tz;
+        }
+
+        if (ix < 0 || ix >= nx_ || iy < 0 || iy >= ny_ || iz < 0 || iz >= nz_)
+            break;
+    }
+    return false;
 }
 aabb uniform_grid::bounding_box() const {
     return box_;

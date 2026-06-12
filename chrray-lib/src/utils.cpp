@@ -1,5 +1,6 @@
 #include <utils.h>
 #include <chrono>
+#include <thread>
 
 namespace chrray {
 static thread_local uint32_t x = 123456789;
@@ -8,8 +9,12 @@ static thread_local uint32_t z = 521288629;
 static thread_local uint32_t w = 88675123;
 
 void init_random() {
-    x = static_cast<uint32_t>(
-        std::chrono::steady_clock::now().time_since_epoch().count());
+    uint64_t t = std::chrono::steady_clock::now().time_since_epoch().count();
+    t ^= std::hash<std::thread::id>{}(std::this_thread::get_id());
+    x = static_cast<uint32_t>(t);
+    y = 362436069;
+    z = 521288629;
+    w = 88675123;
 }
 uint32_t xorshift() {
     uint32_t t = x ^ (x << 11);
@@ -88,6 +93,10 @@ bool aabb::hit_interval(
     float t0 = t_min, t1 = t_max;
     for (int i = 0; i < 3; ++i) {
         float inv_d = 1.0f / dir[i];
+        if (dir[i] == 0.0f) {
+            if (origin[i] < min[i] || origin[i] > max[i]) return false;
+            continue;
+        }
         float t_near = inv_d * (min[i] - origin[i]);
         float t_far = inv_d * (max[i] - origin[i]);
         if (inv_d < 0.0f) std::swap(t_near, t_far);

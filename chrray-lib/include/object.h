@@ -39,7 +39,7 @@ public:
     virtual bool intersect(
         const ray& r, float t_min, float t_max, hit_record& rec) const = 0;
     virtual aabb bounding_box() const = 0;
-    virtual bool any_hit(const ray& r, float t_min, float t_max) const;
+    virtual bool any_hit(const ray& r, float t_min, float t_max) const = 0;
 };
 
 class sphere : public hittable {
@@ -51,6 +51,7 @@ public:
     virtual bool intersect(
         const ray& r, float t_min, float t_max, hit_record& rec) const override;
     virtual aabb bounding_box() const override;
+    virtual bool any_hit(const ray& r, float t_min, float t_max) const override;
 
 private:
     euclidean_coordinate center_;
@@ -68,6 +69,7 @@ public:
     virtual bool intersect(
         const ray& r, float t_min, float t_max, hit_record& rec) const override;
     virtual aabb bounding_box() const override;
+    virtual bool any_hit(const ray& r, float t_min, float t_max) const override;
 
 private:
     euclidean_coordinate v0_, v1_, v2_;
@@ -84,6 +86,7 @@ public:
     virtual bool intersect(
         const ray& r, float t_min, float t_max, hit_record& rec) const override;
     virtual aabb bounding_box() const override;
+    virtual bool any_hit(const ray& r, float t_min, float t_max) const override;
 
 private:
     euclidean_coordinate point_;
@@ -97,6 +100,7 @@ public:
     virtual bool intersect(
         const ray& r, float t_min, float t_max, hit_record& rec) const override;
     virtual aabb bounding_box() const override;
+    virtual bool any_hit(const ray& r, float t_min, float t_max) const override;
 
 private:
     std::vector<std::unique_ptr<hittable>> triangles_;

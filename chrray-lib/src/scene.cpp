@@ -39,20 +39,18 @@ void scene::rebuild_accel() {
 
 bool scene::intersect(
     const ray& r, float t_min, float t_max, hit_record& rec) const {
-    bool hit_plane = false;
+    float closest_plane_t = t_max;
     hit_record plane_rec;
     for (const auto& pl : planes_) {
-        if (pl->intersect(r, t_min, t_max, plane_rec)) {
-            if (!hit_plane || plane_rec.t < plane_rec.t) {
-                hit_plane = true;
-                plane_rec = plane_rec;
-            }
+        hit_record temp;
+        if (pl->intersect(r, t_min, closest_plane_t, temp)) {
+            closest_plane_t = temp.t;
+            plane_rec = temp;
         }
     }
-    float t_max_actual = t_max;
-    if (hit_plane) {
-        t_max_actual = plane_rec.t;
-    }
+    bool hit_plane = (closest_plane_t < t_max);
+
+    float t_max_actual = hit_plane ? closest_plane_t : t_max;
 
     bool hit_obj = false;
     hit_record obj_rec;

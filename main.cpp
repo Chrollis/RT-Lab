@@ -32,8 +32,8 @@ int SAMPLES_PER_PIXEL = 4;
 
 char* SAVE_DIRECTORY = nullptr;
 
-scene sc(accel_t::linear);
-accel_t current_accel = accel_t::linear;
+accel_t current_accel = accel_t::bvh;
+scene sc(current_accel);
 
 camera cam(
     euclidean_coordinate(0, 10, 25),
@@ -96,8 +96,8 @@ color ray_color(const ray& r, int depth) {
     color ambient = rec.mat->diffuse_color(rec, view_dir) * 0.1f;
 
     color scattered_color(0, 0, 0, 1);
-    if (depth < MAX_DEPTH &&
-        !(depth > MIN_DEPTH && random_float() > SURVIVAL)) {
+    float survival_prob = (depth > MIN_DEPTH) ? SURVIVAL : 1.0f;
+    if (depth < MAX_DEPTH && random_float() <= survival_prob) {
         ray scattered;
         color attenuation;
         if (rec.mat->scatter(r, rec, attenuation, scattered)) {
@@ -109,7 +109,7 @@ color ray_color(const ray& r, int depth) {
     return ambient + direct + scattered_color + emitted;
 }
 
-void render() {
+IMAGE render(bool draw) {
     std::vector<color> framebuffer(REAL_WIDTH * REAL_HEIGHT);
     float w_inv = 1.0f / REAL_WIDTH;
     float h_inv = 1.0f / REAL_HEIGHT;
@@ -117,6 +117,7 @@ void render() {
 
 #pragma omp parallel for schedule(static)
     for (int idx = 0; idx < REAL_WIDTH * REAL_HEIGHT; ++idx) {
+        init_random();
         int x = idx % REAL_WIDTH;
         int y = idx / REAL_WIDTH;
         float pr = 0, pg = 0, pb = 0, pa = 0;
@@ -134,78 +135,110 @@ void render() {
         framebuffer[idx] = pixel_color.gamma_correct(2.2f);
     }
 
-    BeginBatchDraw();
+    IMAGE img(WIDTH, HEIGHT);
+    DWORD* bits = GetImageBuffer(&img);
     for (int y = 0; y < HEIGHT; ++y) {
         int src_y = y * REAL_HEIGHT / HEIGHT;
         for (int x = 0; x < WIDTH; ++x) {
             int src_x = x * REAL_WIDTH / WIDTH;
             const color& col = framebuffer[src_y * REAL_WIDTH + src_x];
-            putpixel(x, y, col.to_colorref(BLACK));
+            bits[y * WIDTH + x] = BGR(col.to_colorref(BLACK));
         }
     }
-    EndBatchDraw();
+    if (draw) putimage(0, 0, &img);
+    return img;
+}
+
+color hsv_to_rgb(float h, float s, float v) {
+    h = fmodf(h, 1.0f);
+    float c = v * s;
+    float x = c * (1.0f - fabsf(fmodf(h * 6.0f, 2.0f) - 1.0f));
+    float m = v - c;
+    float rp, gp, bp;
+    if (h < 1.0f / 6.0f) {
+        rp = c;
+        gp = x;
+        bp = 0;
+    } else if (h < 2.0f / 6.0f) {
+        rp = x;
+        gp = c;
+        bp = 0;
+    } else if (h < 3.0f / 6.0f) {
+        rp = 0;
+        gp = c;
+        bp = x;
+    } else if (h < 4.0f / 6.0f) {
+        rp = 0;
+        gp = x;
+        bp = c;
+    } else if (h < 5.0f / 6.0f) {
+        rp = x;
+        gp = 0;
+        bp = c;
+    } else {
+        rp = c;
+        gp = 0;
+        bp = x;
+    }
+    return color(rp + m, gp + m, bp + m, 1.0f);
 }
 
 void build_scene() {
     sc = scene(current_accel);
 
-    auto na_metal =
-        std::make_shared<metal>(color(1.0f, 1.0f, 0.9f, 1.0f), 0.05f);
-    auto na_lambert =
-        std::make_shared<lambertian>(color(1.0f, 1.0f, 0.9f, 1.0f));
-    auto na_diel = std::make_shared<dielectric>(
-        1.5f, color(1.0f, 1.0f, 0.9f, 1.0f), 0.01f);
-    auto al_lambert =
+    float scene_radius = 12.0f + NUM_OBJECTS / 15.0f;
+    float y_max = scene_radius * 0.8f;
+    float y_min = -2.5f;
+
+    trajectory_radius = scene_radius * 1.8f;
+    trajectory_height = y_max * 1.2f;
+
+    auto white_mat =
         std::make_shared<lambertian>(color(1.0f, 1.0f, 1.0f, 1.0f));
-    auto f_lambert =
-        std::make_shared<lambertian>(color(0.9f, 1.0f, 0.9f, 1.0f));
-    auto f_diel = std::make_shared<dielectric>(
-        1.5f, color(0.9f, 1.0f, 0.9f, 1.0f), 0.01f);
+    auto silver_mat =
+        std::make_shared<metal>(color(1.0f, 1.0f, 1.0f, 1.0f), 0.05f);
+    auto glass_mat = std::make_shared<dielectric>(
+        1.46f, color(0.9f, 1.0f, 0.9f, 1.0f), 0.01f);
 
     std::vector<std::shared_ptr<material>> materials = {
-        na_metal, na_lambert, na_diel, al_lambert, f_lambert, f_diel};
-    std::vector<int> weights = {3, 2, 1, 3, 1, 2};
-
-    auto choose_material = [&]() -> std::shared_ptr<material> {
-        int total = 0;
-        for (int w : weights) total += w;
-        int r = static_cast<int>(random_float(0, total));
-        int accum = 0;
-        for (size_t i = 0; i < materials.size(); ++i) {
-            accum += weights[i];
-            if (r < accum) return materials[i];
-        }
-        return materials[0];
-    };
-
-    init_random();
+        white_mat, silver_mat, glass_mat};
 
     for (int i = 0; i < NUM_OBJECTS; ++i) {
-        euclidean_coordinate center(
-            random_float(-16.0f, 16.0f), random_float(-2.0f, 6.0f),
-            random_float(-16.0f, 16.0f));
+        float r = random_float() * scene_radius;
+        float theta = random_float() * 2 * pi;
+        float x = r * cos(theta);
+        float z = r * sin(theta);
+        float y = random_float(y_min, y_max);
+        euclidean_coordinate center(x, y, z);
         float radius = random_float(0.4f, 1.2f);
+        int mat_idx = 0;
+        if (random_float() < 0.3f)
+            mat_idx = 1;
+        else if (random_float() > 0.8f)
+            mat_idx = 2;
         sc.add_object(
-            std::make_shared<sphere>(center, radius, choose_material()));
+            std::make_shared<sphere>(center, radius, materials[mat_idx]));
     }
 
-    auto ground = std::make_shared<lambertian>(color(0.3f, 0.3f, 0.3f, 1.0f));
+    auto ground = std::make_shared<lambertian>(color(0.4f, 0.4f, 0.45f, 1.0f));
     sc.add_plane(
         std::make_shared<plane>(
-            euclidean_coordinate(0, -2.5f, 0), euclidean_coordinate(0, 1, 0),
+            euclidean_coordinate(0, y_min, 0), euclidean_coordinate(0, 1, 0),
             ground));
 
-    auto pl1 = std::make_shared<point_light>(
-        euclidean_coordinate(8, 10, 5), color(1, 1, 1, 1), 1.0f, 0.07f, 0.01f);
-    auto pl2 = std::make_shared<point_light>(
-        euclidean_coordinate(-5, 8, 6), color(0.6f, 0.5f, 1, 1), 1.0f, 0.05f,
-        0.0f);
     auto dl = std::make_shared<directional_light>(
-        euclidean_coordinate(0.5f, -1, -0.3f), color(0.4f, 0.4f, 0.5f, 1));
+        euclidean_coordinate(0.5f, -1.0f, -0.3f).normalize(),
+        color(0.8f, 0.9f, 1.0f, 1.0f) * 1.2f);
 
-    sc.add_light(pl1);
-    sc.add_light(pl2);
+    float light_x = scene_radius * 0.6f;
+    float light_z = scene_radius * 0.5f;
+    float light_y = y_max * 1.1f;
+    auto pl = std::make_shared<point_light>(
+        euclidean_coordinate(light_x, light_y, light_z),
+        color(1.0f, 0.85f, 0.7f, 1.0f), 1.0f, 0.04f, 0.01f);
+
     sc.add_light(dl);
+    sc.add_light(pl);
 
     sc.rebuild_accel();
 }
@@ -271,6 +304,15 @@ void handle_input(ExMessage& msg) {
                     break;
                 case 'R':
                     build_scene();
+                    if (!trajectory_mode) {
+                        float y_min = -2.5f;
+                        float y_max = (12.0f + NUM_OBJECTS / 15.0f) * 0.8f;
+                        float lookat_y = (y_max + y_min) * 0.5f;
+                        cam.set_pose(
+                            euclidean_coordinate(
+                                0, trajectory_height, trajectory_radius),
+                            euclidean_coordinate(0, lookat_y, 0));
+                    }
                     break;
                 case 'T':
                     trajectory_mode = !trajectory_mode;
@@ -286,23 +328,6 @@ void handle_input(ExMessage& msg) {
             }
             break;
     }
-}
-
-std::string find_ffmpeg() {
-    const char* common_paths[] = {
-        "ffmpeg.exe", "C:\\ffmpeg\\bin\\ffmpeg.exe",
-        "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe",
-        "D:\\ffmpeg\\bin\\ffmpeg.exe"};
-    for (const char* path : common_paths) {
-        if (GetFileAttributes(path) != INVALID_FILE_ATTRIBUTES) {
-            return std::string(path);
-        }
-    }
-    char buf[MAX_PATH];
-    if (SearchPath(NULL, "ffmpeg.exe", NULL, sizeof(buf), buf, NULL)) {
-        return std::string(buf);
-    }
-    return "";
 }
 
 int main(int argc, char** argv) {
@@ -325,8 +350,12 @@ int main(int argc, char** argv) {
     if (argc >= 5) {
         SAVE_DIRECTORY = argv[4];
         if (SAVE_DIRECTORY) {
-            if (!CreateDirectory(SAVE_DIRECTORY, NULL)) {
-                SAVE_DIRECTORY = nullptr;
+            DWORD attrib = GetFileAttributes(SAVE_DIRECTORY);
+            if (attrib == INVALID_FILE_ATTRIBUTES ||
+                !(attrib & FILE_ATTRIBUTE_DIRECTORY)) {
+                if (!CreateDirectory(SAVE_DIRECTORY, NULL)) {
+                    SAVE_DIRECTORY = nullptr;
+                }
             }
         }
     }
@@ -341,12 +370,21 @@ int main(int argc, char** argv) {
     init_random();
     build_scene();
 
+    if (!trajectory_mode) {
+        float y_min = -2.5f;
+        float y_max = (12.0f + NUM_OBJECTS / 15.0f) * 0.8f;
+        float lookat_y = (y_max + y_min) * 0.5f;
+        cam = camera(
+            euclidean_coordinate(0, trajectory_height, trajectory_radius),
+            euclidean_coordinate(0, lookat_y, 0), euclidean_coordinate(0, 1, 0),
+            60.0f, float(REAL_WIDTH) / REAL_HEIGHT, 0.1f, 100.0f);
+    }
+
     if (SAVE_DIRECTORY != nullptr) {
         initgraph(200, 150, EX_SHOWCONSOLE);
         HWND hWnd = GetHWnd();
         ShowWindow(hWnd, SW_HIDE);
         IMAGE offscreen(WIDTH, HEIGHT);
-        SetWorkingImage(&offscreen);
         int FPS = 24;
         if (argc >= 6) {
             FPS = std::atoi(argv[5]);
@@ -366,7 +404,7 @@ int main(int argc, char** argv) {
             cam.set_pose(
                 euclidean_coordinate(x, trajectory_height, z),
                 euclidean_coordinate(0, 5, 0));
-            render();
+            offscreen = std::move(render(false));
             char filename[256];
             snprintf(
                 filename, sizeof(filename), "%s\\frame_%03d.bmp",
@@ -383,7 +421,6 @@ int main(int argc, char** argv) {
 
     initgraph(WIDTH, HEIGHT);
     setbkcolor(RGB(0, 0, 0));
-    render();
 
     auto last_time = std::chrono::steady_clock::now();
     bool running = true;
@@ -413,7 +450,7 @@ int main(int argc, char** argv) {
                 euclidean_coordinate(0, 5, 0));
         }
 
-        render();
+        render(true);
         frame_count++;
 
         auto now = std::chrono::steady_clock::now();

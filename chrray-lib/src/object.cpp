@@ -20,11 +20,6 @@ euclidean_coordinate ray::at(float t) const {
 
 hit_record::hit_record() : t(0.0f), u(0.0f), v(0.0f) {}
 
-bool hittable::any_hit(const ray& r, float t_min, float t_max) const {
-    hit_record rec;
-    return intersect(r, t_min, t_max, rec);
-}
-
 sphere::sphere(
     const euclidean_coordinate& center,
     float radius,
@@ -63,6 +58,23 @@ bool sphere::intersect(
 aabb sphere::bounding_box() const {
     euclidean_coordinate delta(radius_, radius_, radius_);
     return aabb(center_ - delta, center_ + delta);
+}
+bool sphere::any_hit(const ray& r, float t_min, float t_max) const {
+    euclidean_coordinate oc = r.origin() - center_;
+    float a = r.direction().dot(r.direction());
+    float b = 2.0f * oc.dot(r.direction());
+    float c = oc.dot(oc) - radius_ * radius_;
+    float discriminant = b * b - 4.0f * a * c;
+    if (discriminant < -eps) return false;
+    if (discriminant < 0.0f) discriminant = 0.0f;
+
+    float sqrt_d = std::sqrtf(discriminant);
+    float t = (-b - sqrt_d) / (2.0f * a);
+    if (t < t_min || t > t_max) {
+        t = (-b + sqrt_d) / (2.0f * a);
+        if (t < t_min || t > t_max) return false;
+    }
+    return true;
 }
 
 triangle::triangle(
@@ -118,6 +130,25 @@ aabb triangle::bounding_box() const {
         std::max({v0_.z(), v1_.z(), v2_.z()}));
     return aabb(min, max);
 }
+bool triangle::any_hit(const ray& r, float t_min, float t_max) const {
+    euclidean_coordinate e1 = v1_ - v0_;
+    euclidean_coordinate e2 = v2_ - v0_;
+    euclidean_coordinate pvec = r.direction().cross(e2);
+    float det = e1.dot(pvec);
+    if (fabs(det) < eps) return false;
+
+    float inv_det = 1.0f / det;
+    euclidean_coordinate tvec = r.origin() - v0_;
+    float u = tvec.dot(pvec) * inv_det;
+    if (u < 0.0f || u > 1.0f) return false;
+
+    euclidean_coordinate qvec = tvec.cross(e1);
+    float v = r.direction().dot(qvec) * inv_det;
+    if (v < 0.0f || u + v > 1.0f) return false;
+
+    float t = e2.dot(qvec) * inv_det;
+    return (t >= t_min && t <= t_max);
+}
 
 plane::plane(
     const euclidean_coordinate& point,
@@ -149,6 +180,12 @@ aabb plane::bounding_box() const {
     return aabb(
         euclidean_coordinate(-half_size, -half_size, -half_size),
         euclidean_coordinate(half_size, half_size, half_size));
+}
+bool plane::any_hit(const ray& r, float t_min, float t_max) const {
+    float denom = r.direction().dot(normal_);
+    if (fabs(denom) < eps) return false;
+    float t = (point_ - r.origin()).dot(normal_) / denom;
+    return (t >= t_min && t <= t_max);
 }
 
 mesh::mesh(const std::filesystem::path& filepath, std::shared_ptr<material> mat)
@@ -211,8 +248,13 @@ bool mesh::intersect(
     }
     return hit_anything;
 }
-
 aabb mesh::bounding_box() const {
     return bbox_;
+}
+bool mesh::any_hit(const ray& r, float t_min, float t_max) const {
+    for (const auto& tri : triangles_) {
+        if (tri->any_hit(r, t_min, t_max)) return true;
+    }
+    return false;
 }
 }  // namespace chrray
