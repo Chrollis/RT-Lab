@@ -1,9 +1,9 @@
-#include <bvh_node.h>
 #include <camera.h>
 #include <graphics.h>
 #include <light.h>
 #include <object.h>
 #include <omp.h>
+#include <scene.h>
 #include <texture.h>
 #include <utils.h>
 #include <chrono>
@@ -18,6 +18,7 @@ using namespace chrray;
 
 const int WIDTH = 1200;
 const int HEIGHT = 900;
+
 int REAL_WIDTH = 400;
 int REAL_HEIGHT = 300;
 int RENDER_SCALE = 3;
@@ -29,17 +30,15 @@ int NUM_OBJECTS = 100;
 const color BACKGROUND_COLOR(0.1f, 0.15f, 0.25f, 1.0f);
 int SAMPLES_PER_PIXEL = 4;
 
-std::vector<std::shared_ptr<hittable>> world;
-std::vector<std::shared_ptr<light>> lights;
-std::shared_ptr<bvh_node> bvh_root;
-bool use_bvh = true;
+scene sc(accel_t::linear);
+accel_t current_accel = accel_t::linear;
 
 camera cam(
     euclidean_coordinate(0, 10, 25),
     euclidean_coordinate(0, 5, 0),
     euclidean_coordinate(0, 1, 0),
     60.0f,
-    float(WIDTH) / HEIGHT,
+    float(REAL_WIDTH) / REAL_HEIGHT,
     0.1f,
     100.0f);
 
@@ -49,52 +48,23 @@ bool is_shadowed(
     float light_distance) {
     ray shadow_ray = lit->shadow_ray(hit_point);
     float t_max = (light_distance > 0) ? light_distance : inf;
-    hit_record rec;
-
-    if (use_bvh) {
-        return bvh_root->any_hit(shadow_ray, eps, t_max);
-    }
-    for (const auto& obj : world) {
-        if (obj->intersect(shadow_ray, eps, t_max, rec)) return true;
-    }
-    return false;
+    return sc.any_hit(shadow_ray, eps, t_max);
 }
 
 color ray_color(const ray& r, int depth) {
     if (depth >= MAX_DEPTH) return color::black();
 
     hit_record rec;
-    float closest_t = inf;
-    std::shared_ptr<hittable> hit_obj = nullptr;
-
-    if (use_bvh) {
-        if (bvh_root->intersect(r, eps, inf, rec)) {
-            hit_obj = bvh_root;
-            closest_t = rec.t;
-        }
-    } else {
-        for (const auto& obj : world) {
-            if (obj->intersect(r, eps, inf, rec)) {
-                if (rec.t < closest_t) {
-                    closest_t = rec.t;
-                    hit_obj = obj;
-                }
-            }
-        }
-    }
-
-    if (!hit_obj) {
+    if (!sc.intersect(r, eps, inf, rec)) {
         float t = 0.5f * (r.direction().y() + 1.0f);
         return BACKGROUND_COLOR * (1.0f - t) +
                color(0.5f, 0.7f, 1.0f, 1.0f) * t;
     }
 
-    if (!use_bvh) hit_obj->intersect(r, eps, inf, rec);
-
     euclidean_coordinate view_dir = -r.direction().normalize();
 
     color direct(0, 0, 0, 1);
-    for (const auto& lit : lights) {
+    for (const auto& lit : sc.get_lights()) {
         euclidean_coordinate light_dir = lit->direction(rec.p);
         float light_dist = lit->distance(rec.p);
         if (is_shadowed(rec.p, lit.get(), light_dist)) continue;
@@ -128,8 +98,7 @@ color ray_color(const ray& r, int depth) {
     }
 
     color emitted = rec.mat->emitted(rec);
-    color final = ambient + direct + scattered_color + emitted;
-    return final;
+    return ambient + direct + scattered_color + emitted;
 }
 
 void render() {
@@ -156,8 +125,8 @@ void render() {
         color pixel_color(pr * s_inv, pg * s_inv, pb * s_inv, pa * s_inv);
         framebuffer[idx] = pixel_color.gamma_correct(2.2f);
     }
-    BeginBatchDraw();
 
+    BeginBatchDraw();
     for (int y = 0; y < HEIGHT; ++y) {
         int src_y = y * REAL_HEIGHT / HEIGHT;
         for (int x = 0; x < WIDTH; ++x) {
@@ -170,75 +139,67 @@ void render() {
 }
 
 void build_scene() {
-    world.clear();
-    lights.clear();
+    sc = scene(current_accel);
 
     auto na_metal =
         std::make_shared<metal>(color(1.0f, 1.0f, 0.9f, 1.0f), 0.05f);
-    auto na_lambertian =
+    auto na_lambert =
         std::make_shared<lambertian>(color(1.0f, 1.0f, 0.9f, 1.0f));
-    auto na_dielectric = std::make_shared<dielectric>(
+    auto na_diel = std::make_shared<dielectric>(
         1.5f, color(1.0f, 1.0f, 0.9f, 1.0f), 0.01f);
-    auto al_lambertian =
+    auto al_lambert =
         std::make_shared<lambertian>(color(1.0f, 1.0f, 1.0f, 1.0f));
-    auto f_lambertian =
+    auto f_lambert =
         std::make_shared<lambertian>(color(0.9f, 1.0f, 0.9f, 1.0f));
-    auto f_dielectric = std::make_shared<dielectric>(
+    auto f_diel = std::make_shared<dielectric>(
         1.5f, color(0.9f, 1.0f, 0.9f, 1.0f), 0.01f);
 
     std::vector<std::shared_ptr<material>> materials = {
-        na_metal,      na_lambertian, na_dielectric,
-        al_lambertian, f_lambertian,  f_dielectric};
-
-    std::vector<int> material_weights = {3, 2, 1, 3, 1, 2};
-
-    auto seed = std::chrono::steady_clock::now().time_since_epoch().count();
-    std::mt19937 rng(static_cast<unsigned int>(seed));
-    std::uniform_real_distribution<float> pos_dist(-16.0f, 16.0f);
-    std::uniform_real_distribution<float> y_dist(-2.0f, 4.0f);
-    std::uniform_real_distribution<float> offset_dist(-0.8f, 0.8f);
-    std::uniform_real_distribution<float> size_dist(0.4f, 1.2f);
+        na_metal, na_lambert, na_diel, al_lambert, f_lambert, f_diel};
+    std::vector<int> weights = {3, 2, 1, 3, 1, 2};
 
     auto choose_material = [&]() -> std::shared_ptr<material> {
         int total = 0;
-        for (int w : material_weights) total += w;
-        int r = std::uniform_int_distribution<int>(0, total - 1)(rng);
+        for (int w : weights) total += w;
+        int r = static_cast<int>(random_float(0, total));
         int accum = 0;
         for (size_t i = 0; i < materials.size(); ++i) {
-            accum += material_weights[i];
+            accum += weights[i];
             if (r < accum) return materials[i];
         }
         return materials[0];
     };
 
+    init_random();
+
     for (int i = 0; i < NUM_OBJECTS; ++i) {
-        euclidean_coordinate center(pos_dist(rng), y_dist(rng), pos_dist(rng));
-        float scale = size_dist(rng);
-        auto mat = choose_material();
-        world.push_back(std::make_shared<sphere>(center, scale, mat));
+        euclidean_coordinate center(
+            random_float(-16.0f, 16.0f), random_float(-2.0f, 6.0f),
+            random_float(-16.0f, 16.0f));
+        float radius = random_float(0.4f, 1.2f);
+        sc.add_object(
+            std::make_shared<sphere>(center, radius, choose_material()));
     }
 
-    auto ground_mat =
-        std::make_shared<lambertian>(color(0.3f, 0.3f, 0.3f, 1.0f));
-    world.push_back(
+    auto ground = std::make_shared<lambertian>(color(0.3f, 0.3f, 0.3f, 1.0f));
+    sc.add_plane(
         std::make_shared<plane>(
             euclidean_coordinate(0, -2.5f, 0), euclidean_coordinate(0, 1, 0),
-            ground_mat));
+            ground));
 
-    auto point_light1 = std::make_shared<point_light>(
-        euclidean_coordinate(8, 10, 5), color(1.0f, 1.0f, 1.0f, 1.0f), 1.0f,
-        0.07f, 0.01f);
-    auto point_light2 = std::make_shared<point_light>(
-        euclidean_coordinate(-5, 8, 6), color(0.6f, 0.5f, 1.0f, 1.0f), 1.0f,
-        0.05f, 0.0f);
-    auto dir_light = std::make_shared<directional_light>(
-        euclidean_coordinate(0.5f, -1.0f, -0.3f),
-        color(0.4f, 0.4f, 0.5f, 1.0f));
-    lights.push_back(point_light1);
-    lights.push_back(point_light2);
-    lights.push_back(dir_light);
+    auto pl1 = std::make_shared<point_light>(
+        euclidean_coordinate(8, 10, 5), color(1, 1, 1, 1), 1.0f, 0.07f, 0.01f);
+    auto pl2 = std::make_shared<point_light>(
+        euclidean_coordinate(-5, 8, 6), color(0.6f, 0.5f, 1, 1), 1.0f, 0.05f,
+        0.0f);
+    auto dl = std::make_shared<directional_light>(
+        euclidean_coordinate(0.5f, -1, -0.3f), color(0.4f, 0.4f, 0.5f, 1));
 
-    bvh_root = std::make_shared<bvh_node>(world, 0, world.size());
+    sc.add_light(pl1);
+    sc.add_light(pl2);
+    sc.add_light(dl);
+
+    sc.rebuild_accel();
 }
 
 void handle_input(ExMessage& msg) {
@@ -284,7 +245,16 @@ void handle_input(ExMessage& msg) {
                     cam.rotate_yaw(-rot_speed);
                     break;
                 case 'B':
-                    use_bvh = !use_bvh;
+                    current_accel = accel_t::bvh;
+                    sc.set_accel_type(accel_t::bvh);
+                    break;
+                case 'N':
+                    current_accel = accel_t::linear;
+                    sc.set_accel_type(accel_t::linear);
+                    break;
+                case 'M':
+                    current_accel = accel_t::uniform_grid;
+                    sc.set_accel_type(accel_t::uniform_grid);
                     break;
                 case 'R':
                     build_scene();
@@ -305,12 +275,12 @@ int main(int argc, char** argv) {
     }
     if (argc >= 3) {
         NUM_OBJECTS = std::atoi(argv[2]);
+        if (NUM_OBJECTS < 1) NUM_OBJECTS = 1;
     }
     if (argc >= 4) {
         SAMPLES_PER_PIXEL = std::atoi(argv[3]);
+        if (SAMPLES_PER_PIXEL < 1) SAMPLES_PER_PIXEL = 1;
     }
-    if (NUM_OBJECTS <= 0) NUM_OBJECTS = 100;
-    if (SAMPLES_PER_PIXEL < 1) SAMPLES_PER_PIXEL = 1;
 
     cam = camera(
         euclidean_coordinate(0, 10, 25), euclidean_coordinate(0, 5, 0),
@@ -318,7 +288,6 @@ int main(int argc, char** argv) {
         0.1f, 100.0f);
 
     omp_set_num_threads(omp_get_max_threads());
-
     initgraph(WIDTH, HEIGHT);
     setbkcolor(RGB(0, 0, 0));
     init_random();
@@ -326,7 +295,6 @@ int main(int argc, char** argv) {
     render();
 
     auto last_time = std::chrono::steady_clock::now();
-
     bool running = true;
     ExMessage msg;
 
@@ -343,11 +311,16 @@ int main(int argc, char** argv) {
         auto now = std::chrono::steady_clock::now();
         float elapsed = std::chrono::duration<float>(now - last_time).count();
         if (elapsed >= 1.0f) {
+            const char* accel_name = "Linear";
+            if (current_accel == accel_t::bvh)
+                accel_name = "BVH";
+            else if (current_accel == accel_t::uniform_grid)
+                accel_name = "Uniform Grid";
             char title[128];
             snprintf(
                 title, sizeof(title),
-                "Ray Tracer - SPF: %.2f | BVH: %s | SCALE: %d", elapsed,
-                use_bvh ? "ON" : "OFF", RENDER_SCALE);
+                "RayTracer | SPF: %.2f | Accel: %s | Scale: %d", elapsed,
+                accel_name, RENDER_SCALE);
             SetWindowText(GetHWnd(), title);
             last_time = now;
         }
