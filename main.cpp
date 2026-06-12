@@ -21,7 +21,7 @@ const int HEIGHT = 900;
 
 int REAL_WIDTH = 400;
 int REAL_HEIGHT = 300;
-int RENDER_SCALE = 3;
+int RENDER_SCALE = 1;
 
 const int MIN_DEPTH = 4;
 const float SURVIVAL = 0.8f;
@@ -29,6 +29,8 @@ const int MAX_DEPTH = 8;
 int NUM_OBJECTS = 100;
 const color BACKGROUND_COLOR(0.1f, 0.15f, 0.25f, 1.0f);
 int SAMPLES_PER_PIXEL = 4;
+
+char* SAVE_DIRECTORY = nullptr;
 
 scene sc(accel_t::linear);
 accel_t current_accel = accel_t::linear;
@@ -41,6 +43,12 @@ camera cam(
     float(REAL_WIDTH) / REAL_HEIGHT,
     0.1f,
     100.0f);
+
+bool trajectory_mode = false;
+float trajectory_angle = 0.0f;
+float trajectory_radius = 25.0f;
+float trajectory_height = 8.0f;
+const float TRAJECTORY_SPEED = 0.5f;
 
 bool is_shadowed(
     const euclidean_coordinate& hit_point,
@@ -205,6 +213,11 @@ void build_scene() {
 void handle_input(ExMessage& msg) {
     const float move_speed = 0.2f;
     const float rot_speed = 3.0f;
+
+    if (trajectory_mode && msg.message == WM_KEYDOWN) {
+        if (!(msg.vkcode == 'T' || msg.vkcode == VK_ESCAPE)) return;
+    }
+
     switch (msg.message) {
         case WM_KEYDOWN:
             switch (msg.vkcode) {
@@ -259,9 +272,37 @@ void handle_input(ExMessage& msg) {
                 case 'R':
                     build_scene();
                     break;
+                case 'T':
+                    trajectory_mode = !trajectory_mode;
+                    if (trajectory_mode) {
+                        trajectory_angle = 0.0f;
+                        float x = trajectory_radius * cos(trajectory_angle);
+                        float z = trajectory_radius * sin(trajectory_angle);
+                        cam.set_pose(
+                            euclidean_coordinate(x, trajectory_height, z),
+                            euclidean_coordinate(0, 5, 0));
+                    }
+                    break;
             }
             break;
     }
+}
+
+std::string find_ffmpeg() {
+    const char* common_paths[] = {
+        "ffmpeg.exe", "C:\\ffmpeg\\bin\\ffmpeg.exe",
+        "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe",
+        "D:\\ffmpeg\\bin\\ffmpeg.exe"};
+    for (const char* path : common_paths) {
+        if (GetFileAttributes(path) != INVALID_FILE_ATTRIBUTES) {
+            return std::string(path);
+        }
+    }
+    char buf[MAX_PATH];
+    if (SearchPath(NULL, "ffmpeg.exe", NULL, sizeof(buf), buf, NULL)) {
+        return std::string(buf);
+    }
+    return "";
 }
 
 int main(int argc, char** argv) {
@@ -281,22 +322,73 @@ int main(int argc, char** argv) {
         SAMPLES_PER_PIXEL = std::atoi(argv[3]);
         if (SAMPLES_PER_PIXEL < 1) SAMPLES_PER_PIXEL = 1;
     }
-
+    if (argc >= 5) {
+        SAVE_DIRECTORY = argv[4];
+        if (SAVE_DIRECTORY) {
+            if (!CreateDirectory(SAVE_DIRECTORY, NULL)) {
+                SAVE_DIRECTORY = nullptr;
+            }
+        }
+    }
+    SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     cam = camera(
         euclidean_coordinate(0, 10, 25), euclidean_coordinate(0, 5, 0),
         euclidean_coordinate(0, 1, 0), 60.0f, float(REAL_WIDTH) / REAL_HEIGHT,
         0.1f, 100.0f);
 
     omp_set_num_threads(omp_get_max_threads());
-    initgraph(WIDTH, HEIGHT);
-    setbkcolor(RGB(0, 0, 0));
     init_random();
     build_scene();
+
+    if (SAVE_DIRECTORY != nullptr) {
+        initgraph(200, 150, EX_SHOWCONSOLE);
+        HWND hWnd = GetHWnd();
+        ShowWindow(hWnd, SW_HIDE);
+        IMAGE offscreen(WIDTH, HEIGHT);
+        SetWorkingImage(&offscreen);
+        int FPS = 24;
+        if (argc >= 6) {
+            FPS = std::atoi(argv[5]);
+            if (FPS < 1) FPS = 1;
+        }
+        const int TOTAL_FRAMES = FPS * 15;
+        float angle_step = 2.0f * pi / TOTAL_FRAMES;
+        float current_angle = 0.0f;
+        sc.set_accel_type(accel_t::uniform_grid);
+
+        printf(
+            "Offline rendering %d frames to %s\n", TOTAL_FRAMES,
+            SAVE_DIRECTORY);
+        for (int frame = 1; frame <= TOTAL_FRAMES; ++frame) {
+            float x = trajectory_radius * cos(current_angle);
+            float z = trajectory_radius * sin(current_angle);
+            cam.set_pose(
+                euclidean_coordinate(x, trajectory_height, z),
+                euclidean_coordinate(0, 5, 0));
+            render();
+            char filename[256];
+            snprintf(
+                filename, sizeof(filename), "%s\\frame_%03d.bmp",
+                SAVE_DIRECTORY, frame);
+            saveimage(filename, &offscreen);
+            printf(
+                "Saved %s (%.1f%%)\n", filename, 100.0f * frame / TOTAL_FRAMES);
+            current_angle += angle_step;
+        }
+        SetWorkingImage(NULL);
+        closegraph();
+        return 0;
+    }
+
+    initgraph(WIDTH, HEIGHT);
+    setbkcolor(RGB(0, 0, 0));
     render();
 
     auto last_time = std::chrono::steady_clock::now();
     bool running = true;
     ExMessage msg;
+    int frame_count = 0;
 
     while (running) {
         while (peekmessage(&msg, EM_KEY)) {
@@ -306,25 +398,38 @@ int main(int argc, char** argv) {
             }
             handle_input(msg);
         }
+
+        if (trajectory_mode) {
+            auto now = std::chrono::steady_clock::now();
+            float dt = std::chrono::duration<float>(now - last_time).count();
+            if (dt > 0.1f) dt = 0.1f;
+            trajectory_angle += TRAJECTORY_SPEED * dt;
+            if (trajectory_angle > 2 * pi) trajectory_angle -= 2 * pi;
+
+            float x = trajectory_radius * cos(trajectory_angle);
+            float z = trajectory_radius * sin(trajectory_angle);
+            cam.set_pose(
+                euclidean_coordinate(x, trajectory_height, z),
+                euclidean_coordinate(0, 5, 0));
+        }
+
         render();
+        frame_count++;
 
         auto now = std::chrono::steady_clock::now();
         float elapsed = std::chrono::duration<float>(now - last_time).count();
-        if (elapsed >= 1.0f) {
-            const char* accel_name = "Linear";
-            if (current_accel == accel_t::bvh)
-                accel_name = "BVH";
-            else if (current_accel == accel_t::uniform_grid)
-                accel_name = "Uniform Grid";
-            char title[128];
-            snprintf(
-                title, sizeof(title),
-                "RayTracer | SPF: %.2f | Accel: %s | Scale: %d", elapsed,
-                accel_name, RENDER_SCALE);
-            SetWindowText(GetHWnd(), title);
-            last_time = now;
-        }
-        Sleep(16);
+        const char* accel_name = "Linear";
+        if (current_accel == accel_t::bvh)
+            accel_name = "BVH";
+        else if (current_accel == accel_t::uniform_grid)
+            accel_name = "Uniform Grid";
+        char title[128];
+        snprintf(
+            title, sizeof(title),
+            "RayTracer | SPF: %.2f | Accel: %s | Scale: %d", elapsed,
+            accel_name, RENDER_SCALE);
+        SetWindowText(GetHWnd(), title);
+        last_time = now;
     }
     closegraph();
     return 0;
