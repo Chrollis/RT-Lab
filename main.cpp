@@ -8,6 +8,7 @@
 #include <utils.h>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <memory>
 #include <random>
 #include <vector>
@@ -16,19 +17,18 @@
 
 using namespace chrray;
 
-const int WIDTH = 1200;
-const int HEIGHT = 900;
+int WIDTH = 960;
+int HEIGHT = 720;
 
-int REAL_WIDTH = 400;
-int REAL_HEIGHT = 300;
-int RENDER_SCALE = 1;
-
-const int MIN_DEPTH = 4;
-const float SURVIVAL = 0.8f;
-const int MAX_DEPTH = 8;
 int NUM_OBJECTS = 100;
-const color BACKGROUND_COLOR(0.1f, 0.15f, 0.25f, 1.0f);
+int MIN_DEPTH = 2;
+int MAX_DEPTH = 8;
 int SAMPLES_PER_PIXEL = 4;
+
+int offline_fps = 24;
+
+const float SURVIVAL = 0.8f;
+const color BACKGROUND_COLOR(0.1f, 0.15f, 0.25f, 1.0f);
 
 char* SAVE_DIRECTORY = nullptr;
 
@@ -40,7 +40,7 @@ camera cam(
     euclidean_coordinate(0, 5, 0),
     euclidean_coordinate(0, 1, 0),
     60.0f,
-    float(REAL_WIDTH) / REAL_HEIGHT,
+    float(WIDTH) / HEIGHT,
     0.1f,
     100.0f);
 
@@ -110,16 +110,16 @@ color ray_color(const ray& r, int depth) {
 }
 
 IMAGE render(bool draw) {
-    std::vector<color> framebuffer(REAL_WIDTH * REAL_HEIGHT);
-    float w_inv = 1.0f / REAL_WIDTH;
-    float h_inv = 1.0f / REAL_HEIGHT;
+    std::vector<color> framebuffer(WIDTH * HEIGHT);
+    float w_inv = 1.0f / WIDTH;
+    float h_inv = 1.0f / HEIGHT;
     float s_inv = 1.0f / SAMPLES_PER_PIXEL;
 
 #pragma omp parallel for schedule(static)
-    for (int idx = 0; idx < REAL_WIDTH * REAL_HEIGHT; ++idx) {
+    for (int idx = 0; idx < WIDTH * HEIGHT; ++idx) {
         init_random();
-        int x = idx % REAL_WIDTH;
-        int y = idx / REAL_WIDTH;
+        int x = idx % WIDTH;
+        int y = idx / WIDTH;
         float pr = 0, pg = 0, pb = 0, pa = 0;
         for (int s = 0; s < SAMPLES_PER_PIXEL; ++s) {
             float u = (x + random_float()) * w_inv;
@@ -138,10 +138,8 @@ IMAGE render(bool draw) {
     IMAGE img(WIDTH, HEIGHT);
     DWORD* bits = GetImageBuffer(&img);
     for (int y = 0; y < HEIGHT; ++y) {
-        int src_y = y * REAL_HEIGHT / HEIGHT;
         for (int x = 0; x < WIDTH; ++x) {
-            int src_x = x * REAL_WIDTH / WIDTH;
-            const color& col = framebuffer[src_y * REAL_WIDTH + src_x];
+            const color& col = framebuffer[y * WIDTH + x];
             bits[y * WIDTH + x] = BGR(col.to_colorref(BLACK));
         }
     }
@@ -210,14 +208,14 @@ void build_scene() {
         float z = r * sin(theta);
         float y = random_float(y_min, y_max);
         euclidean_coordinate center(x, y, z);
-        float radius = random_float(0.4f, 1.2f);
         int mat_idx = 0;
         if (random_float() < 0.3f)
             mat_idx = 1;
         else if (random_float() > 0.8f)
             mat_idx = 2;
         sc.add_object(
-            std::make_shared<sphere>(center, radius, materials[mat_idx]));
+            std::make_shared<sphere>(
+                center, random_float(0.4f, 1.2f), materials[mat_idx]));
     }
 
     auto ground = std::make_shared<lambertian>(color(0.4f, 0.4f, 0.45f, 1.0f));
@@ -227,18 +225,21 @@ void build_scene() {
             ground));
 
     auto dl = std::make_shared<directional_light>(
-        euclidean_coordinate(0.5f, -1.0f, -0.3f).normalize(),
+        euclidean_coordinate(0.5f, -1.0f, -0.5f).normalize(),
         color(0.8f, 0.9f, 1.0f, 1.0f) * 1.2f);
 
-    float light_x = scene_radius * 0.6f;
-    float light_z = scene_radius * 0.5f;
-    float light_y = y_max * 1.1f;
-    auto pl = std::make_shared<point_light>(
-        euclidean_coordinate(light_x, light_y, light_z),
-        color(1.0f, 0.85f, 0.7f, 1.0f), 1.0f, 0.04f, 0.01f);
+    auto pl1 = std::make_shared<point_light>(
+        euclidean_coordinate(
+            scene_radius * 0.5f, y_max * 1.2f, scene_radius * 0.5f),
+        color(1.0f, 0.85f, 0.7f, 1.0f), 1.0f, 0.01f, 0.01f);
+    auto pl2 = std::make_shared<point_light>(
+        euclidean_coordinate(
+            -scene_radius * 0.5f, y_max * 1.2f, -scene_radius * 0.5f),
+        color(1.0f, 0.85f, 0.7f, 1.0f), 1.0f, 0.01f, 0.01f);
 
     sc.add_light(dl);
-    sc.add_light(pl);
+    sc.add_light(pl1);
+    sc.add_light(pl2);
 
     sc.rebuild_accel();
 }
@@ -330,41 +331,93 @@ void handle_input(ExMessage& msg) {
     }
 }
 
+void parse_command_line(int argc, char** argv) {
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "-h") == 0) {
+            printf(
+                "Usage: raytracer [options]\n"
+                "Options:\n"
+                "  -h                 Show this help message\n"
+                "  -ql                Set resolution to 640x480, offline "
+                "FPS=6\n"
+                "  -qm                Set resolution to 960x720, offline "
+                "FPS=12\n"
+                "  -qh                Set resolution to 1440x1080, offline "
+                "FPS=24\n"
+                "  -cf                Set object count = 10 (few)\n"
+                "  -cn                Set object count = 100 (normal)\n"
+                "  -cm                Set object count = 500 (many)\n"
+                "  -rd                Set recursion depth: MIN=8, MAX=32 "
+                "(deep)\n"
+                "  -rm                Set recursion depth: MIN=4, MAX=16 "
+                "(medium)\n"
+                "  -rs                Set recursion depth: MIN=2, MAX=8 "
+                "(shallow)\n"
+                "  -al                Set MSAA samples = 2 (low)\n"
+                "  -am                Set MSAA samples = 4 (medium)\n"
+                "  -ah                Set MSAA samples = 8 (high)\n"
+                "  -s <path>          Set save directory for offline "
+                "rendering\n");
+            exit(0);
+        } else if (strcmp(argv[i], "-ql") == 0) {
+            WIDTH = 640;
+            HEIGHT = 480;
+            offline_fps = 6;
+        } else if (strcmp(argv[i], "-qm") == 0) {
+            WIDTH = 960;
+            HEIGHT = 720;
+            offline_fps = 12;
+        } else if (strcmp(argv[i], "-qh") == 0) {
+            WIDTH = 1440;
+            HEIGHT = 1080;
+            offline_fps = 24;
+        } else if (strcmp(argv[i], "-cf") == 0) {
+            NUM_OBJECTS = 10;
+        } else if (strcmp(argv[i], "-cn") == 0) {
+            NUM_OBJECTS = 100;
+        } else if (strcmp(argv[i], "-cm") == 0) {
+            NUM_OBJECTS = 500;
+        } else if (strcmp(argv[i], "-rd") == 0) {
+            MIN_DEPTH = 8;
+            MAX_DEPTH = 32;
+        } else if (strcmp(argv[i], "-rm") == 0) {
+            MIN_DEPTH = 4;
+            MAX_DEPTH = 16;
+        } else if (strcmp(argv[i], "-rs") == 0) {
+            MIN_DEPTH = 2;
+            MAX_DEPTH = 8;
+        } else if (strcmp(argv[i], "-al") == 0) {
+            SAMPLES_PER_PIXEL = 2;
+        } else if (strcmp(argv[i], "-am") == 0) {
+            SAMPLES_PER_PIXEL = 4;
+        } else if (strcmp(argv[i], "-ah") == 0) {
+            SAMPLES_PER_PIXEL = 8;
+        } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
+            SAVE_DIRECTORY = argv[++i];
+        }
+    }
+}
+
 int main(int argc, char** argv) {
-    if (argc >= 2) {
-        RENDER_SCALE = std::atoi(argv[1]);
-        if (RENDER_SCALE < 1) RENDER_SCALE = 1;
-        REAL_WIDTH = WIDTH / RENDER_SCALE;
-        REAL_HEIGHT = HEIGHT / RENDER_SCALE;
-        if (REAL_WIDTH < 1) REAL_WIDTH = 1;
-        if (REAL_HEIGHT < 1) REAL_HEIGHT = 1;
-    }
-    if (argc >= 3) {
-        NUM_OBJECTS = std::atoi(argv[2]);
-        if (NUM_OBJECTS < 1) NUM_OBJECTS = 1;
-    }
-    if (argc >= 4) {
-        SAMPLES_PER_PIXEL = std::atoi(argv[3]);
-        if (SAMPLES_PER_PIXEL < 1) SAMPLES_PER_PIXEL = 1;
-    }
-    if (argc >= 5) {
-        SAVE_DIRECTORY = argv[4];
-        if (SAVE_DIRECTORY) {
-            DWORD attrib = GetFileAttributes(SAVE_DIRECTORY);
-            if (attrib == INVALID_FILE_ATTRIBUTES ||
-                !(attrib & FILE_ATTRIBUTE_DIRECTORY)) {
-                if (!CreateDirectory(SAVE_DIRECTORY, NULL)) {
-                    SAVE_DIRECTORY = nullptr;
-                }
+    parse_command_line(argc, argv);
+
+    if (SAVE_DIRECTORY) {
+        DWORD attrib = GetFileAttributes(SAVE_DIRECTORY);
+        if (attrib == INVALID_FILE_ATTRIBUTES ||
+            !(attrib & FILE_ATTRIBUTE_DIRECTORY)) {
+            if (!CreateDirectory(SAVE_DIRECTORY, NULL)) {
+                SAVE_DIRECTORY = nullptr;
             }
         }
     }
+
     SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+
     cam = camera(
         euclidean_coordinate(0, 10, 25), euclidean_coordinate(0, 5, 0),
-        euclidean_coordinate(0, 1, 0), 60.0f, float(REAL_WIDTH) / REAL_HEIGHT,
-        0.1f, 100.0f);
+        euclidean_coordinate(0, 1, 0), 60.0f, float(WIDTH) / HEIGHT, 0.1f,
+        100.0f);
 
     omp_set_num_threads(omp_get_max_threads());
     init_random();
@@ -377,7 +430,7 @@ int main(int argc, char** argv) {
         cam = camera(
             euclidean_coordinate(0, trajectory_height, trajectory_radius),
             euclidean_coordinate(0, lookat_y, 0), euclidean_coordinate(0, 1, 0),
-            60.0f, float(REAL_WIDTH) / REAL_HEIGHT, 0.1f, 100.0f);
+            60.0f, float(WIDTH) / HEIGHT, 0.1f, 100.0f);
     }
 
     if (SAVE_DIRECTORY != nullptr) {
@@ -385,12 +438,7 @@ int main(int argc, char** argv) {
         HWND hWnd = GetHWnd();
         ShowWindow(hWnd, SW_HIDE);
         IMAGE offscreen(WIDTH, HEIGHT);
-        int FPS = 24;
-        if (argc >= 6) {
-            FPS = std::atoi(argv[5]);
-            if (FPS < 1) FPS = 1;
-        }
-        const int TOTAL_FRAMES = FPS * 15;
+        const int TOTAL_FRAMES = offline_fps * 15;
         float angle_step = 2.0f * pi / TOTAL_FRAMES;
         float current_angle = 0.0f;
         sc.set_accel_type(accel_t::uniform_grid);
@@ -462,9 +510,8 @@ int main(int argc, char** argv) {
             accel_name = "Uniform Grid";
         char title[128];
         snprintf(
-            title, sizeof(title),
-            "RayTracer | SPF: %.2f | Accel: %s | Scale: %d", elapsed,
-            accel_name, RENDER_SCALE);
+            title, sizeof(title), "RayTracer | SPF: %.2f | Accel: %s | %dx%d",
+            elapsed, accel_name, WIDTH, HEIGHT);
         SetWindowText(GetHWnd(), title);
         last_time = now;
     }
