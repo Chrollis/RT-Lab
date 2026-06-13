@@ -60,53 +60,65 @@ bool is_shadowed(
 }
 
 color ray_color(const ray& r, int depth) {
-    if (depth >= MAX_DEPTH) return color::black();
+    color throughput(1.0f, 1.0f, 1.0f, 1.0f);
+    color accumulated(0.0f, 0.0f, 0.0f, 1.0f);
+    ray current_ray = r;
+    int current_depth = 0;
 
-    hit_record rec;
-    if (!sc.intersect(r, eps, inf, rec)) {
-        float t = 0.5f * (r.direction().y() + 1.0f);
-        return BACKGROUND_COLOR * (1.0f - t) +
-               color(0.5f, 0.7f, 1.0f, 1.0f) * t;
-    }
+    while (current_depth < MAX_DEPTH) {
+        hit_record rec;
+        if (!sc.intersect(current_ray, eps, inf, rec)) {
+            float t = 0.5f * (current_ray.direction().y() + 1.0f);
+            color bg = BACKGROUND_COLOR * (1.0f - t) +
+                       color(0.5f, 0.7f, 1.0f, 1.0f) * t;
+            accumulated = accumulated + throughput * bg;
+            break;
+        }
 
-    euclidean_coordinate view_dir = -r.direction().normalize();
+        euclidean_coordinate view_dir = -current_ray.direction().normalize();
 
-    color direct(0, 0, 0, 1);
-    for (const auto& lit : sc.get_lights()) {
-        euclidean_coordinate light_dir = lit->direction(rec.p);
-        float light_dist = lit->distance(rec.p);
-        if (is_shadowed(rec.p, lit.get(), light_dist)) continue;
+        color direct(0.0f, 0.0f, 0.0f, 1.0f);
+        for (const auto& lit : sc.get_lights()) {
+            euclidean_coordinate light_dir = lit->direction(rec.p);
+            float light_dist = lit->distance(rec.p);
+            if (is_shadowed(rec.p, lit.get(), light_dist)) continue;
 
-        color light_intensity = lit->intensity(rec.p);
-        float ndotl = std::max(0.0f, rec.n.dot(light_dir));
-        color diff =
-            rec.mat->diffuse_color(rec, view_dir) * light_intensity * ndotl;
+            color light_intensity = lit->intensity(rec.p);
+            float ndotl = std::max(0.0f, rec.n.dot(light_dir));
+            color diff =
+                rec.mat->diffuse_color(rec, view_dir) * light_intensity * ndotl;
 
-        euclidean_coordinate half_dir = (light_dir + view_dir).normalize();
-        float ndoth = std::max(0.0f, rec.n.dot(half_dir));
-        float shininess = rec.mat->shininess(rec);
-        float spec_intensity = rec.mat->specular_strength(rec, view_dir) *
-                               std::powf(ndoth, shininess);
-        color spec = rec.mat->specular_color(rec, view_dir) * light_intensity *
-                     spec_intensity;
+            euclidean_coordinate half_dir = (light_dir + view_dir).normalize();
+            float ndoth = std::max(0.0f, rec.n.dot(half_dir));
+            float shininess = rec.mat->shininess(rec);
+            float spec_intensity = rec.mat->specular_strength(rec, view_dir) *
+                                   std::powf(ndoth, shininess);
+            color spec = rec.mat->specular_color(rec, view_dir) *
+                         light_intensity * spec_intensity;
 
-        direct = direct + diff + spec;
-    }
+            direct = direct + diff + spec;
+        }
 
-    color ambient = rec.mat->diffuse_color(rec, view_dir) * 0.1f;
+        color ambient = rec.mat->diffuse_color(rec, view_dir) * 0.1f;
+        accumulated = accumulated + throughput * (ambient + direct);
 
-    color scattered_color(0, 0, 0, 1);
-    float survival_prob = (depth > MIN_DEPTH) ? SURVIVAL : 1.0f;
-    if (depth < MAX_DEPTH && random_float() <= survival_prob) {
+        float survival_prob = (current_depth > MIN_DEPTH) ? SURVIVAL : 1.0f;
+        if (random_float() > survival_prob) {
+            break;
+        }
+
         ray scattered;
         color attenuation;
-        if (rec.mat->scatter(r, rec, attenuation, scattered)) {
-            scattered_color = ray_color(scattered, depth + 1) * attenuation;
+        if (!rec.mat->scatter(current_ray, rec, attenuation, scattered)) {
+            break;
         }
+
+        throughput = throughput * attenuation * (1.0f / survival_prob);
+        current_ray = scattered;
+        current_depth++;
     }
 
-    color emitted = rec.mat->emitted(rec);
-    return ambient + direct + scattered_color + emitted;
+    return accumulated;
 }
 
 IMAGE render(bool draw) {

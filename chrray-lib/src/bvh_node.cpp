@@ -61,32 +61,36 @@ bool bvh_node::intersect_node(
     stack.reserve(64);
     stack.push_back({this, t_min, t_max});
 
+    float closest_so_far = t_max;
     bool hit = false;
+
     while (!stack.empty()) {
         Item item = stack.back();
         stack.pop_back();
-        const bvh_node* node = item.node;
 
-        if (!node->box_.hit(r.origin(), r.direction(), item.t_min, item.t_max))
+        if (item.t_min >= closest_so_far) continue;
+
+        if (!item.node->box_.hit(
+                r.origin(), r.direction(), item.t_min, item.t_max))
             continue;
 
-        if (!node->left_ && !node->right_) {
-            for (const auto& obj : node->leaf_objects_) {
-                if (obj->intersect(r, item.t_min, item.t_max, rec)) {
+        if (!item.node->left_ && !item.node->right_) {
+            for (const auto& obj : item.node->leaf_objects_) {
+                if (obj->intersect(r, item.t_min, closest_so_far, rec)) {
                     hit = true;
-                    item.t_max = rec.t;
+                    closest_so_far = rec.t;
                 }
             }
         } else {
             float t_left_entry = item.t_min, t_left_exit = item.t_max;
             float t_right_entry = item.t_min, t_right_exit = item.t_max;
-            bool hit_left = node->left_
-                                ? node->left_->box_.hit_interval(
+            bool hit_left = item.node->left_
+                                ? item.node->left_->box_.hit_interval(
                                       r.origin(), r.direction(), item.t_min,
                                       item.t_max, t_left_entry, t_left_exit)
                                 : false;
-            bool hit_right = node->right_
-                                 ? node->right_->box_.hit_interval(
+            bool hit_right = item.node->right_
+                                 ? item.node->right_->box_.hit_interval(
                                        r.origin(), r.direction(), item.t_min,
                                        item.t_max, t_right_entry, t_right_exit)
                                  : false;
@@ -94,20 +98,27 @@ bool bvh_node::intersect_node(
             if (hit_left && hit_right) {
                 if (t_left_entry < t_right_entry) {
                     stack.push_back(
-                        {node->right_.get(), t_right_entry, t_right_exit});
+                        {item.node->right_.get(), t_right_entry,
+                         std::min(t_right_exit, closest_so_far)});
                     stack.push_back(
-                        {node->left_.get(), t_left_entry, t_left_exit});
+                        {item.node->left_.get(), t_left_entry,
+                         std::min(t_left_exit, closest_so_far)});
                 } else {
                     stack.push_back(
-                        {node->left_.get(), t_left_entry, t_left_exit});
+                        {item.node->left_.get(), t_left_entry,
+                         std::min(t_left_exit, closest_so_far)});
                     stack.push_back(
-                        {node->right_.get(), t_right_entry, t_right_exit});
+                        {item.node->right_.get(), t_right_entry,
+                         std::min(t_right_exit, closest_so_far)});
                 }
             } else if (hit_left) {
-                stack.push_back({node->left_.get(), t_left_entry, t_left_exit});
+                stack.push_back(
+                    {item.node->left_.get(), t_left_entry,
+                     std::min(t_left_exit, closest_so_far)});
             } else if (hit_right) {
                 stack.push_back(
-                    {node->right_.get(), t_right_entry, t_right_exit});
+                    {item.node->right_.get(), t_right_entry,
+                     std::min(t_right_exit, closest_so_far)});
             }
         }
     }
