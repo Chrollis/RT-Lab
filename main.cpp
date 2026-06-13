@@ -334,6 +334,9 @@ void handle_input(ExMessage& msg) {
 void parse_command_line(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-h") == 0) {
+            initgraph(200, 150, EX_SHOWCONSOLE);
+            HWND hWnd = GetHWnd();
+            ShowWindow(hWnd, SW_HIDE);
             printf(
                 "Usage: raytracer [options]\n"
                 "Options:\n"
@@ -358,6 +361,8 @@ void parse_command_line(int argc, char** argv) {
                 "  -ah                Set MSAA samples = 8 (high)\n"
                 "  -s <path>          Set save directory for offline "
                 "rendering\n");
+            system("pause");
+            closegraph();
             exit(0);
         } else if (strcmp(argv[i], "-ql") == 0) {
             WIDTH = 640;
@@ -463,6 +468,7 @@ int main(int argc, char** argv) {
             current_angle += angle_step;
         }
         SetWorkingImage(NULL);
+        system("pause");
         closegraph();
         return 0;
     }
