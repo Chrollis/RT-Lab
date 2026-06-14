@@ -41,6 +41,8 @@ bool uniform_grid::intersect(
     float tx0, tx1, ty0, ty1, tz0, tz1;
     if (!box_.hit_interval(r.origin(), r.direction(), t_min, t_max, tx0, tx1))
         return false;
+    tx0 -= eps;
+    tx1 += eps;
     int ix = (int)((r.at(tx0).x() - box_.min.x()) * inv_step_.x());
     int iy = (int)((r.at(tx0).y() - box_.min.y()) * inv_step_.y());
     int iz = (int)((r.at(tx0).z() - box_.min.z()) * inv_step_.z());
@@ -49,17 +51,20 @@ bool uniform_grid::intersect(
     iz = std::clamp(iz, 0, nz_ - 1);
 
     float t = tx0;
-    bool hit = false;
+    float closest = t_max;
     while (t <= tx1) {
         for (const auto& obj : cells_[ix + nx_ * (iy + ny_ * iz)]) {
-            if (obj->intersect(r, t_min, t_max, rec)) {
-                if (rec.t < tx1) {
-                    hit = true;
-                    t_max = rec.t;
+            hit_record temp_rec;
+            if (obj->intersect(r, t_min, closest, temp_rec)) {
+                if (temp_rec.t < closest) {
+                    closest = temp_rec.t;
+                    rec = temp_rec;
                 }
             }
         }
-        if (hit) return true;
+        if (closest < t_max) {
+            if (closest <= tx1 + eps) return true;
+        }
         float next_tx =
             (ix + (r.direction().x() > 0 ? 1 : 0)) * step_.x() + box_.min.x();
         float next_ty =
@@ -94,6 +99,8 @@ bool uniform_grid::any_hit(const ray& r, float t_min, float t_max) const {
     float tx0, tx1;
     if (!box_.hit_interval(r.origin(), r.direction(), t_min, t_max, tx0, tx1))
         return false;
+    tx0 -= eps;
+    tx1 += eps;
 
     int ix = (int)((r.at(tx0).x() - box_.min.x()) * inv_step_.x());
     int iy = (int)((r.at(tx0).y() - box_.min.y()) * inv_step_.y());

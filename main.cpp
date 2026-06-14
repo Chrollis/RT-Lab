@@ -21,11 +21,13 @@ int WIDTH = 960;
 int HEIGHT = 720;
 
 int NUM_OBJECTS = 100;
-int MIN_DEPTH = 2;
+int actual_objects = 0;
+int MIN_DEPTH = 4;
 int MAX_DEPTH = 8;
 int SAMPLES_PER_PIXEL = 4;
 
 int offline_fps = 24;
+bool auto_trajectory = false;
 
 const float SURVIVAL = 0.8f;
 const color BACKGROUND_COLOR(0.1f, 0.15f, 0.25f, 1.0f);
@@ -159,46 +161,12 @@ IMAGE render(bool draw) {
     return img;
 }
 
-color hsv_to_rgb(float h, float s, float v) {
-    h = fmodf(h, 1.0f);
-    float c = v * s;
-    float x = c * (1.0f - fabsf(fmodf(h * 6.0f, 2.0f) - 1.0f));
-    float m = v - c;
-    float rp, gp, bp;
-    if (h < 1.0f / 6.0f) {
-        rp = c;
-        gp = x;
-        bp = 0;
-    } else if (h < 2.0f / 6.0f) {
-        rp = x;
-        gp = c;
-        bp = 0;
-    } else if (h < 3.0f / 6.0f) {
-        rp = 0;
-        gp = c;
-        bp = x;
-    } else if (h < 4.0f / 6.0f) {
-        rp = 0;
-        gp = x;
-        bp = c;
-    } else if (h < 5.0f / 6.0f) {
-        rp = x;
-        gp = 0;
-        bp = c;
-    } else {
-        rp = c;
-        gp = 0;
-        bp = x;
-    }
-    return color(rp + m, gp + m, bp + m, 1.0f);
-}
-
 void build_scene() {
     sc = scene(current_accel);
 
-    float scene_radius = 12.0f + NUM_OBJECTS / 15.0f;
-    float y_max = scene_radius * 0.8f;
-    float y_min = -2.5f;
+    float scene_radius = 10.0f + NUM_OBJECTS / 50.0f;
+    float y_max = scene_radius + 2.0f;
+    float y_min = 1.0f;
 
     trajectory_radius = scene_radius * 1.8f;
     trajectory_height = y_max * 1.2f;
@@ -213,27 +181,52 @@ void build_scene() {
     std::vector<std::shared_ptr<material>> materials = {
         white_mat, silver_mat, glass_mat};
 
+    const int MAX_ATTEMPTS = 500;
+    std::vector<euclidean_coordinate> centers;
+    std::vector<float> radii;
+
+    actual_objects = 0;
     for (int i = 0; i < NUM_OBJECTS; ++i) {
-        float r = random_float() * scene_radius;
-        float theta = random_float() * 2 * pi;
-        float x = r * cos(theta);
-        float z = r * sin(theta);
-        float y = random_float(y_min, y_max);
-        euclidean_coordinate center(x, y, z);
-        int mat_idx = 0;
-        if (random_float() < 0.3f)
-            mat_idx = 1;
-        else if (random_float() > 0.8f)
-            mat_idx = 2;
-        sc.add_object(
-            std::make_shared<sphere>(
-                center, random_float(0.4f, 1.2f), materials[mat_idx]));
+        for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt) {
+            float r = random_float() * scene_radius;
+            float theta = random_float() * 2 * pi;
+            float phi = random_float() * pi * 0.5;
+            float x = r * cosf(phi) * cosf(theta);
+            float z = r * cosf(phi) * sinf(theta);
+            float y = r * sinf(phi) + y_min;
+            float radius = random_float(0.5f, y_min);
+            euclidean_coordinate center(x, y, z);
+
+            bool overlap = false;
+            for (size_t j = 0; j < centers.size(); ++j) {
+                float dist = (center - centers[j]).length();
+                float min_dist = radius + radii[j];
+                if (dist < min_dist) {
+                    overlap = true;
+                    break;
+                }
+            }
+            if (!overlap) {
+                centers.push_back(center);
+                radii.push_back(radius);
+                int mat_idx = 0;
+                if (random_float() < 0.3f)
+                    mat_idx = 1;
+                else if (random_float() > 0.8f)
+                    mat_idx = 2;
+                sc.add_object(
+                    std::make_shared<sphere>(
+                        center, radius, materials[mat_idx]));
+                actual_objects++;
+                break;
+            }
+        }
     }
 
     auto ground = std::make_shared<lambertian>(color(0.4f, 0.4f, 0.45f, 1.0f));
     sc.add_plane(
         std::make_shared<plane>(
-            euclidean_coordinate(0, y_min, 0), euclidean_coordinate(0, 1, 0),
+            euclidean_coordinate(0, 0, 0), euclidean_coordinate(0, 1, 0),
             ground));
 
     auto dl = std::make_shared<directional_light>(
@@ -346,36 +339,81 @@ void handle_input(ExMessage& msg) {
 void parse_command_line(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-h") == 0) {
-            initgraph(200, 150, EX_SHOWCONSOLE);
+            initgraph(WIDTH, HEIGHT, EX_SHOWCONSOLE);
             HWND hWnd = GetHWnd();
             ShowWindow(hWnd, SW_HIDE);
             printf(
                 "Usage: raytracer [options]\n"
                 "Options:\n"
-                "  -h                 Show this help message\n"
-                "  -ql                Set resolution to 640x480, offline "
-                "FPS=6\n"
-                "  -qm                Set resolution to 960x720, offline "
-                "FPS=12\n"
-                "  -qh                Set resolution to 1440x1080, offline "
-                "FPS=24\n"
-                "  -cf                Set object count = 10 (few)\n"
-                "  -cn                Set object count = 100 (normal)\n"
-                "  -cm                Set object count = 500 (many)\n"
-                "  -rd                Set recursion depth: MIN=8, MAX=32 "
-                "(deep)\n"
-                "  -rm                Set recursion depth: MIN=4, MAX=16 "
-                "(medium)\n"
-                "  -rs                Set recursion depth: MIN=2, MAX=8 "
-                "(shallow)\n"
-                "  -al                Set MSAA samples = 2 (low)\n"
-                "  -am                Set MSAA samples = 4 (medium)\n"
-                "  -ah                Set MSAA samples = 8 (high)\n"
-                "  -s <path>          Set save directory for offline "
-                "rendering\n");
+                "  -h                     Show this help message\n"
+                "  -q <w> <h> [fps]       Set resolution to w x h (fps default "
+                "24)\n"
+                "  -c <count>             Set number of objects\n"
+                "  -r <min> <max>         Set recursion depth min and max\n"
+                "  -a <samples>           Set MSAA samples per pixel\n"
+                "  -ql                    Set resolution to 640x480, offline "
+                "fps=6\n"
+                "  -qm                    Set resolution to 960x720, offline "
+                "fps=12\n"
+                "  -qh                    Set resolution to 1440x1080, offline "
+                "fps=24\n"
+                "  -cf                    Set object count = 10\n"
+                "  -cn                    Set object count = 100\n"
+                "  -cm                    Set object count = 500\n"
+                "  -rd                    Set recursion depth: MIN=16, MAX=32\n"
+                "  -rm                    Set recursion depth: MIN=8, MAX=16\n"
+                "  -rs                    Set recursion depth: MIN=4, MAX=8\n"
+                "  -al                    Set MSAA samples = 2\n"
+                "  -am                    Set MSAA samples = 4\n"
+                "  -ah                    Set MSAA samples = 8\n"
+                "  -s <path>              Set save directory for offline "
+                "rendering\n"
+                "  -l                     Set initial rendering algorithm to "
+                "Linear\n"
+                "  -b                     Set initial rendering algorithm to "
+                "BVH\n"
+                "  -u                     Set initial rendering algorithm to "
+                "Uniform Grid\n"
+                "  -t                     Auto trajectory mode (real-time) "
+                "or show frames in offline\n");
             system("pause");
             closegraph();
             exit(0);
+        } else if (strcmp(argv[i], "-q") == 0) {
+            if (i + 2 >= argc) {
+                printf("Error: -q requires width and height.\n");
+                exit(1);
+            }
+            WIDTH = atoi(argv[++i]);
+            HEIGHT = atoi(argv[++i]);
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                offline_fps = atoi(argv[++i]);
+            } else {
+                offline_fps = 24;
+            }
+        } else if (strcmp(argv[i], "-c") == 0) {
+            if (i + 1 >= argc) {
+                printf("Error: -c requires a count.\n");
+                exit(1);
+            }
+            NUM_OBJECTS = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-r") == 0) {
+            if (i + 2 >= argc) {
+                printf("Error: -r requires min_depth and max_depth.\n");
+                exit(1);
+            }
+            MIN_DEPTH = atoi(argv[++i]);
+            MAX_DEPTH = atoi(argv[++i]);
+            if (MIN_DEPTH > MAX_DEPTH) {
+                printf("Error: MIN_DEPTH must be <= MAX_DEPTH\n");
+                exit(1);
+            }
+        } else if (strcmp(argv[i], "-a") == 0) {
+            if (i + 1 >= argc) {
+                printf("Error: -a requires a samples count.\n");
+                exit(1);
+            }
+            SAMPLES_PER_PIXEL = atoi(argv[++i]);
         } else if (strcmp(argv[i], "-ql") == 0) {
             WIDTH = 640;
             HEIGHT = 480;
@@ -395,13 +433,13 @@ void parse_command_line(int argc, char** argv) {
         } else if (strcmp(argv[i], "-cm") == 0) {
             NUM_OBJECTS = 500;
         } else if (strcmp(argv[i], "-rd") == 0) {
-            MIN_DEPTH = 8;
+            MIN_DEPTH = 16;
             MAX_DEPTH = 32;
         } else if (strcmp(argv[i], "-rm") == 0) {
-            MIN_DEPTH = 4;
+            MIN_DEPTH = 8;
             MAX_DEPTH = 16;
         } else if (strcmp(argv[i], "-rs") == 0) {
-            MIN_DEPTH = 2;
+            MIN_DEPTH = 4;
             MAX_DEPTH = 8;
         } else if (strcmp(argv[i], "-al") == 0) {
             SAMPLES_PER_PIXEL = 2;
@@ -409,8 +447,23 @@ void parse_command_line(int argc, char** argv) {
             SAMPLES_PER_PIXEL = 4;
         } else if (strcmp(argv[i], "-ah") == 0) {
             SAMPLES_PER_PIXEL = 8;
-        } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
+        } else if (strcmp(argv[i], "-s") == 0) {
+            if (i + 1 >= argc) {
+                printf("Error: -s requires a directory path.\n");
+                exit(1);
+            }
             SAVE_DIRECTORY = argv[++i];
+        } else if (strcmp(argv[i], "-l") == 0) {
+            current_accel = accel_t::linear;
+            sc.set_accel_type(current_accel);
+        } else if (strcmp(argv[i], "-b") == 0) {
+            current_accel = accel_t::bvh;
+            sc.set_accel_type(current_accel);
+        } else if (strcmp(argv[i], "-u") == 0) {
+            current_accel = accel_t::uniform_grid;
+            sc.set_accel_type(current_accel);
+        } else if (strcmp(argv[i], "-t") == 0) {
+            auto_trajectory = true;
         }
     }
 }
@@ -431,11 +484,6 @@ int main(int argc, char** argv) {
     SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
-    cam = camera(
-        euclidean_coordinate(0, 10, 25), euclidean_coordinate(0, 5, 0),
-        euclidean_coordinate(0, 1, 0), 60.0f, float(WIDTH) / HEIGHT, 0.1f,
-        100.0f);
-
     omp_set_num_threads(omp_get_max_threads());
     init_random();
     build_scene();
@@ -451,9 +499,14 @@ int main(int argc, char** argv) {
     }
 
     if (SAVE_DIRECTORY != nullptr) {
-        initgraph(200, 150, EX_SHOWCONSOLE);
+        initgraph(WIDTH, HEIGHT, EX_SHOWCONSOLE);
         HWND hWnd = GetHWnd();
-        ShowWindow(hWnd, SW_HIDE);
+        if (!auto_trajectory) {
+            ShowWindow(hWnd, SW_HIDE);
+        } else {
+            SetWindowText(
+                hWnd, "RayTracer - Offline Rendering (Auto Trajectory)");
+        }
         IMAGE offscreen(WIDTH, HEIGHT);
         const int TOTAL_FRAMES = offline_fps * 15;
         float angle_step = 2.0f * pi / TOTAL_FRAMES;
@@ -469,7 +522,8 @@ int main(int argc, char** argv) {
             cam.set_pose(
                 euclidean_coordinate(x, trajectory_height, z),
                 euclidean_coordinate(0, 5, 0));
-            offscreen = std::move(render(false));
+
+            offscreen = std::move(render(auto_trajectory));
             char filename[256];
             snprintf(
                 filename, sizeof(filename), "%s\\frame_%03d.bmp",
@@ -479,7 +533,6 @@ int main(int argc, char** argv) {
                 "Saved %s (%.1f%%)\n", filename, 100.0f * frame / TOTAL_FRAMES);
             current_angle += angle_step;
         }
-        SetWorkingImage(NULL);
         system("pause");
         closegraph();
         return 0;
@@ -492,6 +545,15 @@ int main(int argc, char** argv) {
     bool running = true;
     ExMessage msg;
     int frame_count = 0;
+    if (auto_trajectory) {
+        trajectory_mode = true;
+        trajectory_angle = 0.0f;
+        float x = trajectory_radius * cos(trajectory_angle);
+        float z = trajectory_radius * sin(trajectory_angle);
+        cam.set_pose(
+            euclidean_coordinate(x, trajectory_height, z),
+            euclidean_coordinate(0, 5, 0));
+    }
 
     while (running) {
         while (peekmessage(&msg, EM_KEY)) {
@@ -528,8 +590,9 @@ int main(int argc, char** argv) {
             accel_name = "Uniform Grid";
         char title[128];
         snprintf(
-            title, sizeof(title), "RayTracer | SPF: %.2f | Accel: %s | %dx%d",
-            elapsed, accel_name, WIDTH, HEIGHT);
+            title, sizeof(title),
+            "RayTracer | OBJ: %d | SPF: %.2f | Accel: %s | %dx%d",
+            actual_objects, elapsed, accel_name, WIDTH, HEIGHT);
         SetWindowText(GetHWnd(), title);
         last_time = now;
     }
