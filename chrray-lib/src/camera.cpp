@@ -26,9 +26,6 @@ void camera::update_axes() const {
     up_ = right_.cross(forward_).normalize();
     cache_valid_ = true;
 }
-void camera::update_lookat_from_axes() {
-    lookat_ = origin_ + forward_;
-}
 ray camera::get_ray(float u, float v) const {
     if (!cache_valid_) update_axes();
     float half_height = near_plane_ * std::tan(vfov_ * 0.5f * pi / 180.0f);
@@ -44,20 +41,17 @@ ray camera::get_ray(float u, float v) const {
 void camera::move_forward(float distance) {
     if (!cache_valid_) update_axes();
     origin_ = origin_ + forward_ * distance;
-    update_lookat_from_axes();
-    cache_valid_ = false;
+    lookat_ = origin_ + forward_;
 }
 void camera::move_right(float distance) {
     if (!cache_valid_) update_axes();
     origin_ = origin_ + right_ * distance;
-    update_lookat_from_axes();
-    cache_valid_ = false;
+    lookat_ = origin_ + forward_;
 }
 void camera::move_up(float distance) {
     if (!cache_valid_) update_axes();
     origin_ = origin_ + up_ * distance;
-    update_lookat_from_axes();
-    cache_valid_ = false;
+    lookat_ = origin_ + forward_;
 }
 void camera::rotate_yaw(float angle_deg) {
     if (!cache_valid_) update_axes();
@@ -66,7 +60,7 @@ void camera::rotate_yaw(float angle_deg) {
     forward_ = q.rotate_vector(forward_);
     right_ = forward_.cross(up_).normalize();
     up_ = right_.cross(forward_).normalize();
-    update_lookat_from_axes();
+    lookat_ = origin_ + forward_;
     cache_valid_ = true;
 }
 void camera::rotate_pitch(float angle_deg) {
@@ -75,7 +69,7 @@ void camera::rotate_pitch(float angle_deg) {
     quaternion q = quaternion::from_axis_angle(right_, rad);
     forward_ = q.rotate_vector(forward_);
     up_ = right_.cross(forward_).normalize();
-    update_lookat_from_axes();
+    lookat_ = origin_ + forward_;
     cache_valid_ = true;
 }
 void camera::rotate_roll(float angle_deg) {
@@ -85,7 +79,7 @@ void camera::rotate_roll(float angle_deg) {
     up_ = q.rotate_vector(up_);
     right_ = forward_.cross(up_).normalize();
     up_ = right_.cross(forward_).normalize();
-    update_lookat_from_axes();
+    lookat_ = origin_ + forward_;
     cache_valid_ = true;
 }
 void camera::set_pose(
@@ -114,5 +108,46 @@ const euclidean_coordinate& camera::origin() const {
 }
 const euclidean_coordinate& camera::lookat() const {
     return lookat_;
+}
+void camera::reset_up() {
+    if (!cache_valid_) update_axes();
+    right_ = forward_.cross(world_up_).normalize();
+    up_ = right_.cross(forward_).normalize();
+    cache_valid_ = true;
+}
+homogeneous_transform camera::view_matrix() const {
+    if (!cache_valid_) update_axes();
+    homogeneous_transform V;
+    V(0, 0) = right_.x();
+    V(0, 1) = right_.y();
+    V(0, 2) = right_.z();
+    V(0, 3) = -right_.dot(origin_);
+    V(1, 0) = up_.x();
+    V(1, 1) = up_.y();
+    V(1, 2) = up_.z();
+    V(1, 3) = -up_.dot(origin_);
+    V(2, 0) = -forward_.x();
+    V(2, 1) = -forward_.y();
+    V(2, 2) = -forward_.z();
+    V(2, 3) = forward_.dot(origin_);
+    V(3, 0) = 0;
+    V(3, 1) = 0;
+    V(3, 2) = 0;
+    V(3, 3) = 1;
+    return V;
+}
+
+homogeneous_transform camera::projection_matrix() const {
+    float f = 1.0f / tanf(vfov_ * 0.5f * pi / 180.0f);
+    float aspect = aspect_;
+    float n = near_plane_;
+    float f_plane = far_plane_;
+    homogeneous_transform P;
+    P(0, 0) = f / aspect;
+    P(1, 1) = f;
+    P(2, 2) = -(f_plane + n) / (f_plane - n);
+    P(2, 3) = -(2.0f * f_plane * n) / (f_plane - n);
+    P(3, 2) = -1.0f;
+    return P;
 }
 }  // namespace chrray

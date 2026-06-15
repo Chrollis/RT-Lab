@@ -36,6 +36,14 @@ void scene::rebuild_accel() {
             std::make_shared<uniform_grid>(objects_, world_box, n, n, n);
     }
 }
+void scene::build_triangles() {
+    global_triangles_.clear();
+    for (auto& obj : objects_) {
+        auto tris = obj->triangulate();
+        global_triangles_.insert(
+            global_triangles_.end(), tris.begin(), tris.end());
+    }
+}
 
 bool scene::intersect(
     const ray& r, float t_min, float t_max, hit_record& rec) const {
@@ -93,7 +101,15 @@ bool scene::any_hit(const ray& r, float t_min, float t_max) const {
 const std::vector<std::shared_ptr<light>>& scene::get_lights() const {
     return lights_;
 }
-
+const std::vector<std::shared_ptr<hittable>>& scene::get_objects() const {
+    return objects_;
+}
+const std::vector<std::shared_ptr<plane>>& scene::get_planes() const {
+    return planes_;
+}
+const std::vector<Triangle>& scene::get_global_triangles() const {
+    return global_triangles_;
+}
 bool scene::intersect_linear(
     const ray& r, float t_min, float t_max, hit_record& rec) const {
     bool hit = false;

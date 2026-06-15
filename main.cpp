@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <memory>
 #include <random>
 #include <vector>
@@ -28,6 +29,8 @@ int SAMPLES_PER_PIXEL = 4;
 
 int offline_fps = 24;
 bool auto_trajectory = false;
+bool save_single_frame = false;
+bool use_rasterize = false;
 
 const float SURVIVAL = 0.8f;
 const color BACKGROUND_COLOR(0.1f, 0.15f, 0.25f, 1.0f);
@@ -129,7 +132,7 @@ IMAGE render(bool draw) {
     float h_inv = 1.0f / HEIGHT;
     float s_inv = 1.0f / SAMPLES_PER_PIXEL;
 
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for schedule(dynamic, 16)
     for (int idx = 0; idx < WIDTH * HEIGHT; ++idx) {
         init_random();
         int x = idx % WIDTH;
@@ -159,6 +162,160 @@ IMAGE render(bool draw) {
     }
     if (draw) putimage(0, 0, &img);
     return img;
+}
+
+void render_rasterized() {
+    const int w = WIDTH, h = HEIGHT;
+    const size_t pixel_count = w * h;
+
+    const auto& triangles = sc.get_global_triangles();
+    if (triangles.empty()) return;
+
+    homogeneous_transform V = cam.view_matrix();
+    homogeneous_transform P = cam.projection_matrix();
+    homogeneous_transform VP = P * V;
+
+    euclidean_coordinate light_dir(0.5f, -1.0f, -0.5f);
+    light_dir = light_dir.normalize();
+
+    int num_threads = omp_get_max_threads();
+    std::vector<std::vector<float>> local_zbuffers(num_threads);
+    std::vector<std::vector<color>> local_framebuffers(num_threads);
+    for (int t = 0; t < num_threads; ++t) {
+        local_zbuffers[t].assign(pixel_count, INFINITY);
+        local_framebuffers[t].assign(pixel_count, color::black());
+    }
+
+#pragma omp parallel for schedule(dynamic, 16)
+    for (int idx = 0; idx < (int)triangles.size(); ++idx) {
+        int tid = omp_get_thread_num();
+        std::vector<float>& zbuffer = local_zbuffers[tid];
+        std::vector<color>& framebuffer = local_framebuffers[tid];
+
+        const auto& tri = triangles[idx];
+
+        euclidean_coordinate v0_w = tri.v0;
+        euclidean_coordinate v1_w = tri.v1;
+        euclidean_coordinate v2_w = tri.v2;
+
+        euclidean_coordinate center = (v0_w + v1_w + v2_w) / 3.0f;
+        euclidean_coordinate view_dir = (cam.origin() - center).normalize();
+        if (tri.normal.dot(view_dir) >= 0) continue;
+
+        homogeneous_coordinate h0 = v0_w.homogenize();
+        homogeneous_coordinate h1 = v1_w.homogenize();
+        homogeneous_coordinate h2 = v2_w.homogenize();
+        h0 = VP * h0;
+        h1 = VP * h1;
+        h2 = VP * h2;
+
+        float w0 = h0.w(), w1 = h1.w(), w2 = h2.w();
+
+        if (w0 <= 0 && w1 <= 0 && w2 <= 0) continue;
+
+        euclidean_coordinate ndc0 = h0.dehomogenize();
+        euclidean_coordinate ndc1 = h1.dehomogenize();
+        euclidean_coordinate ndc2 = h2.dehomogenize();
+
+        if (fabs(ndc0.x()) > 2.0f || fabs(ndc0.y()) > 2.0f ||
+            fabs(ndc0.z()) > 2.0f || fabs(ndc1.x()) > 2.0f ||
+            fabs(ndc1.y()) > 2.0f || fabs(ndc1.z()) > 2.0f ||
+            fabs(ndc2.x()) > 2.0f || fabs(ndc2.y()) > 2.0f ||
+            fabs(ndc2.z()) > 2.0f)
+            continue;
+
+        if ((ndc0.x() < -1 && ndc1.x() < -1 && ndc2.x() < -1) ||
+            (ndc0.x() > 1 && ndc1.x() > 1 && ndc2.x() > 1) ||
+            (ndc0.y() < -1 && ndc1.y() < -1 && ndc2.y() < -1) ||
+            (ndc0.y() > 1 && ndc1.y() > 1 && ndc2.y() > 1) ||
+            (ndc0.z() < -1 && ndc1.z() < -1 && ndc2.z() < -1) ||
+            (ndc0.z() > 1 && ndc1.z() > 1 && ndc2.z() > 1))
+            continue;
+
+        auto to_screen =
+            [&](const euclidean_coordinate& ndc) -> euclidean_coordinate {
+            float x = (ndc.x() + 1.0f) * 0.5f * w;
+            float y = (1.0f - ndc.y()) * 0.5f * h;
+            float z = ndc.z();
+            return euclidean_coordinate(x, y, z);
+        };
+        euclidean_coordinate s0 = to_screen(ndc0);
+        euclidean_coordinate s1 = to_screen(ndc1);
+        euclidean_coordinate s2 = to_screen(ndc2);
+
+        if (!std::isfinite(s0.x()) || !std::isfinite(s0.y()) ||
+            !std::isfinite(s1.x()) || !std::isfinite(s1.y()) ||
+            !std::isfinite(s2.x()) || !std::isfinite(s2.y()))
+            continue;
+
+        int xmin =
+            std::max(0, (int)std::floor(std::min({s0.x(), s1.x(), s2.x()})));
+        int xmax =
+            std::min(w - 1, (int)std::ceil(std::max({s0.x(), s1.x(), s2.x()})));
+        int ymin =
+            std::max(0, (int)std::floor(std::min({s0.y(), s1.y(), s2.y()})));
+        int ymax =
+            std::min(h - 1, (int)std::ceil(std::max({s0.y(), s1.y(), s2.y()})));
+
+        if (xmin > xmax || ymin > ymax) continue;
+
+        color base_color =
+            tri.mat->diffuse_color(hit_record(), euclidean_coordinate(0, 0, 0));
+
+        auto edge = [](const euclidean_coordinate& a,
+                       const euclidean_coordinate& b,
+                       const euclidean_coordinate& p) -> float {
+            return (b.x() - a.x()) * (p.y() - a.y()) -
+                   (b.y() - a.y()) * (p.x() - a.x());
+        };
+        float area = edge(s0, s1, s2);
+        if (area == 0.0f) continue;
+        float inv_area = 1.0f / area;
+
+        euclidean_coordinate n = tri.normal.normalize();
+
+        for (int y = ymin; y <= ymax; ++y) {
+            for (int x = xmin; x <= xmax; ++x) {
+                euclidean_coordinate p(x + 0.5f, y + 0.5f, 0);
+                float w0 = edge(s1, s2, p);
+                float w1 = edge(s2, s0, p);
+                float w2 = edge(s0, s1, p);
+                if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+                w0 *= inv_area;
+                w1 *= inv_area;
+                w2 *= inv_area;
+                float depth = w0 * s0.z() + w1 * s1.z() + w2 * s2.z();
+                int pixel_idx = y * w + x;
+                if (depth < zbuffer[pixel_idx]) {
+                    zbuffer[pixel_idx] = depth;
+                    float ndotl = std::max(0.0f, n.dot(light_dir));
+                    color lit = base_color * ndotl + base_color * 0.1f;
+                    framebuffer[pixel_idx] = lit.gamma_correct(2.2f);
+                }
+            }
+        }
+    }
+
+    IMAGE img(w, h);
+    DWORD* img_bits = GetImageBuffer(&img);
+    memset(img_bits, 0, w * h * sizeof(DWORD));
+
+    for (size_t idx = 0; idx < pixel_count; ++idx) {
+        float best_depth = INFINITY;
+        color best_color = color::black();
+        for (int t = 0; t < num_threads; ++t) {
+            float d = local_zbuffers[t][idx];
+            if (d < best_depth) {
+                best_depth = d;
+                best_color = local_framebuffers[t][idx];
+            }
+        }
+        img_bits[idx] = best_color.to_colorref(BLACK);
+    }
+
+    BeginBatchDraw();
+    putimage(0, 0, &img);
+    EndBatchDraw();
 }
 
 void build_scene() {
@@ -223,7 +380,7 @@ void build_scene() {
         }
     }
 
-    auto ground = std::make_shared<lambertian>(color(0.4f, 0.4f, 0.45f, 1.0f));
+    auto ground = std::make_shared<metal>(color(0.4f, 0.4f, 0.45f, 1.0f), 0.0f);
     sc.add_plane(
         std::make_shared<plane>(
             euclidean_coordinate(0, 0, 0), euclidean_coordinate(0, 1, 0),
@@ -247,6 +404,7 @@ void build_scene() {
     sc.add_light(pl2);
 
     sc.rebuild_accel();
+    sc.build_triangles();
 }
 
 void handle_input(ExMessage& msg) {
@@ -254,7 +412,10 @@ void handle_input(ExMessage& msg) {
     const float rot_speed = 3.0f;
 
     if (trajectory_mode && msg.message == WM_KEYDOWN) {
-        if (!(msg.vkcode == 'T' || msg.vkcode == VK_ESCAPE)) return;
+        if (!(msg.vkcode == 'T' || msg.vkcode == 'Z' || msg.vkcode == 'B' ||
+              msg.vkcode == 'N' || msg.vkcode == 'M' || msg.vkcode == 'R' ||
+              msg.vkcode == VK_ESCAPE))
+            return;
     }
 
     switch (msg.message) {
@@ -331,6 +492,12 @@ void handle_input(ExMessage& msg) {
                             euclidean_coordinate(0, 5, 0));
                     }
                     break;
+                case 'Z':
+                    use_rasterize = !use_rasterize;
+                    break;
+                case 'Y':
+                    cam.reset_up();
+                    break;
             }
             break;
     }
@@ -368,6 +535,10 @@ void parse_command_line(int argc, char** argv) {
                 "  -ah                    Set MSAA samples = 8\n"
                 "  -s <path>              Set save directory for offline "
                 "rendering\n"
+                "  -sd                    Save multi frames to default "
+                "directory \"./save\"\n"
+                "  -ss                    Save single frame to current "
+                "directory \"./\" and exit\n"
                 "  -l                     Set initial rendering algorithm to "
                 "Linear\n"
                 "  -b                     Set initial rendering algorithm to "
@@ -453,6 +624,11 @@ void parse_command_line(int argc, char** argv) {
                 exit(1);
             }
             SAVE_DIRECTORY = argv[++i];
+        } else if (strcmp(argv[i], "-sd") == 0) {
+            SAVE_DIRECTORY = strdup("./save");
+        } else if (strcmp(argv[i], "-ss") == 0) {
+            save_single_frame = true;
+            SAVE_DIRECTORY = strdup(".");
         } else if (strcmp(argv[i], "-l") == 0) {
             current_accel = accel_t::linear;
             sc.set_accel_type(current_accel);
@@ -464,6 +640,18 @@ void parse_command_line(int argc, char** argv) {
             sc.set_accel_type(current_accel);
         } else if (strcmp(argv[i], "-t") == 0) {
             auto_trajectory = true;
+        } else if (strcmp(argv[i], "-d") == 0) {
+            auto_trajectory = true;
+            WIDTH = 320;
+            HEIGHT = 240;
+            offline_fps = 6;
+            NUM_OBJECTS = 25;
+            MIN_DEPTH = 8;
+            MAX_DEPTH = 8;
+            SAMPLES_PER_PIXEL = 2;
+            current_accel = accel_t::uniform_grid;
+            sc.set_accel_type(current_accel);
+            return;
         }
     }
 }
@@ -481,96 +669,78 @@ int main(int argc, char** argv) {
         }
     }
 
-    SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
-
     omp_set_num_threads(omp_get_max_threads());
-    init_random();
-    build_scene();
 
-    if (!trajectory_mode) {
-        float y_min = -2.5f;
-        float y_max = (12.0f + NUM_OBJECTS / 15.0f) * 0.8f;
-        float lookat_y = (y_max + y_min) * 0.5f;
-        cam = camera(
-            euclidean_coordinate(0, trajectory_height, trajectory_radius),
-            euclidean_coordinate(0, lookat_y, 0), euclidean_coordinate(0, 1, 0),
-            60.0f, float(WIDTH) / HEIGHT, 0.1f, 100.0f);
-    }
+    try {
+        init_random();
+        build_scene();
 
-    if (SAVE_DIRECTORY != nullptr) {
-        initgraph(WIDTH, HEIGHT, EX_SHOWCONSOLE);
-        HWND hWnd = GetHWnd();
-        if (!auto_trajectory) {
-            ShowWindow(hWnd, SW_HIDE);
-        } else {
-            SetWindowText(
-                hWnd, "RayTracer - Offline Rendering (Auto Trajectory)");
+        if (!trajectory_mode) {
+            float y_min = -2.5f;
+            float y_max = (12.0f + NUM_OBJECTS / 15.0f) * 0.8f;
+            float lookat_y = (y_max + y_min) * 0.5f;
+            cam = camera(
+                euclidean_coordinate(0, trajectory_height, trajectory_radius),
+                euclidean_coordinate(0, lookat_y, 0),
+                euclidean_coordinate(0, 1, 0), 60.0f, float(WIDTH) / HEIGHT,
+                0.1f, 100.0f);
         }
-        IMAGE offscreen(WIDTH, HEIGHT);
-        const int TOTAL_FRAMES = offline_fps * 15;
-        float angle_step = 2.0f * pi / TOTAL_FRAMES;
-        float current_angle = 0.0f;
-        sc.set_accel_type(accel_t::uniform_grid);
 
-        printf(
-            "Offline rendering %d frames to %s\n", TOTAL_FRAMES,
-            SAVE_DIRECTORY);
-        for (int frame = 1; frame <= TOTAL_FRAMES; ++frame) {
-            float x = trajectory_radius * cos(current_angle);
-            float z = trajectory_radius * sin(current_angle);
-            cam.set_pose(
-                euclidean_coordinate(x, trajectory_height, z),
-                euclidean_coordinate(0, 5, 0));
+        auto last_time = std::chrono::steady_clock::now();
 
-            offscreen = std::move(render(auto_trajectory));
-            char filename[256];
-            snprintf(
-                filename, sizeof(filename), "%s\\frame_%03d.bmp",
-                SAVE_DIRECTORY, frame);
-            saveimage(filename, &offscreen);
-            printf(
-                "Saved %s (%.1f%%)\n", filename, 100.0f * frame / TOTAL_FRAMES);
-            current_angle += angle_step;
-        }
-        system("pause");
-        closegraph();
-        return 0;
-    }
-
-    initgraph(WIDTH, HEIGHT);
-    setbkcolor(RGB(0, 0, 0));
-
-    auto last_time = std::chrono::steady_clock::now();
-    bool running = true;
-    ExMessage msg;
-    int frame_count = 0;
-    if (auto_trajectory) {
-        trajectory_mode = true;
-        trajectory_angle = 0.0f;
-        float x = trajectory_radius * cos(trajectory_angle);
-        float z = trajectory_radius * sin(trajectory_angle);
-        cam.set_pose(
-            euclidean_coordinate(x, trajectory_height, z),
-            euclidean_coordinate(0, 5, 0));
-    }
-
-    while (running) {
-        while (peekmessage(&msg, EM_KEY)) {
-            if (msg.message == WM_KEYDOWN && msg.vkcode == VK_ESCAPE) {
-                running = false;
-                break;
+        if (save_single_frame || SAVE_DIRECTORY != nullptr) {
+            initgraph(WIDTH, HEIGHT, EX_SHOWCONSOLE);
+            HWND hWnd = GetHWnd();
+            if (!auto_trajectory) {
+                ShowWindow(hWnd, SW_HIDE);
+            } else {
+                SetWindowText(
+                    hWnd, "RayTracer - Offline Rendering (Auto Trajectory)");
             }
-            handle_input(msg);
+            IMAGE offscreen(WIDTH, HEIGHT);
+            const int TOTAL_FRAMES = save_single_frame ? 1 : offline_fps * 15;
+            float angle_step = 2.0f * pi / TOTAL_FRAMES;
+            float current_angle = 0.0f;
+            sc.set_accel_type(accel_t::uniform_grid);
+
+            printf(
+                "Offline rendering %d frames to %s\n", TOTAL_FRAMES,
+                SAVE_DIRECTORY);
+            for (int frame = 1; frame <= TOTAL_FRAMES; ++frame) {
+                float x = trajectory_radius * cos(current_angle);
+                float z = trajectory_radius * sin(current_angle);
+                cam.set_pose(
+                    euclidean_coordinate(x, trajectory_height, z),
+                    euclidean_coordinate(0, 5, 0));
+
+                offscreen = std::move(render(auto_trajectory));
+                auto now = std::chrono::steady_clock::now();
+                float dt =
+                    std::chrono::duration<float>(now - last_time).count();
+                char filename[256];
+                snprintf(
+                    filename, sizeof(filename), "%s\\frame_%03d.bmp",
+                    SAVE_DIRECTORY, frame);
+                saveimage(filename, &offscreen);
+                printf(
+                    "Saved %s (%.1f%%); SPF: %.02f\n", filename,
+                    100.0f * frame / TOTAL_FRAMES, dt);
+                current_angle += angle_step;
+            }
+            system("pause");
+            closegraph();
+            return 0;
         }
 
-        if (trajectory_mode) {
-            auto now = std::chrono::steady_clock::now();
-            float dt = std::chrono::duration<float>(now - last_time).count();
-            if (dt > 0.1f) dt = 0.1f;
-            trajectory_angle += TRAJECTORY_SPEED * dt;
-            if (trajectory_angle > 2 * pi) trajectory_angle -= 2 * pi;
+        initgraph(WIDTH, HEIGHT);
+        setbkcolor(RGB(0, 0, 0));
 
+        bool running = true;
+        ExMessage msg;
+        int frame_count = 0;
+        if (auto_trajectory) {
+            trajectory_mode = true;
+            trajectory_angle = 0.0f;
             float x = trajectory_radius * cos(trajectory_angle);
             float z = trajectory_radius * sin(trajectory_angle);
             cam.set_pose(
@@ -578,24 +748,58 @@ int main(int argc, char** argv) {
                 euclidean_coordinate(0, 5, 0));
         }
 
-        render(true);
-        frame_count++;
+        while (running) {
+            while (peekmessage(&msg, EM_KEY)) {
+                if (msg.message == WM_KEYDOWN && msg.vkcode == VK_ESCAPE) {
+                    running = false;
+                    break;
+                }
+                handle_input(msg);
+            }
 
-        auto now = std::chrono::steady_clock::now();
-        float elapsed = std::chrono::duration<float>(now - last_time).count();
-        const char* accel_name = "Linear";
-        if (current_accel == accel_t::bvh)
-            accel_name = "BVH";
-        else if (current_accel == accel_t::uniform_grid)
-            accel_name = "Uniform Grid";
-        char title[128];
-        snprintf(
-            title, sizeof(title),
-            "RayTracer | OBJ: %d | SPF: %.2f | Accel: %s | %dx%d",
-            actual_objects, elapsed, accel_name, WIDTH, HEIGHT);
-        SetWindowText(GetHWnd(), title);
-        last_time = now;
+            if (trajectory_mode) {
+                auto now = std::chrono::steady_clock::now();
+                float dt =
+                    std::chrono::duration<float>(now - last_time).count();
+                if (dt > 0.1f) dt = 0.1f;
+                trajectory_angle += TRAJECTORY_SPEED * dt;
+                if (trajectory_angle > 2 * pi) trajectory_angle -= 2 * pi;
+
+                float x = trajectory_radius * cos(trajectory_angle);
+                float z = trajectory_radius * sin(trajectory_angle);
+                cam.set_pose(
+                    euclidean_coordinate(x, trajectory_height, z),
+                    euclidean_coordinate(0, 5, 0));
+            }
+
+            if (use_rasterize) {
+                render_rasterized();
+            } else {
+                render(true);
+            }
+            frame_count++;
+
+            auto now = std::chrono::steady_clock::now();
+            float elapsed =
+                std::chrono::duration<float>(now - last_time).count();
+            char title[128];
+            const char* accel_name = "Linear";
+            if (current_accel == accel_t::bvh)
+                accel_name = "BVH";
+            else if (current_accel == accel_t::uniform_grid)
+                accel_name = "Uniform Grid";
+            if (use_rasterize) accel_name = "Z-buffer";
+            snprintf(
+                title, sizeof(title),
+                "RayTracer | OBJ: %d | SPF: %.2f | Accel: %s | %dx%d",
+                actual_objects, elapsed, accel_name, WIDTH, HEIGHT);
+            SetWindowText(GetHWnd(), title);
+            last_time = now;
+        }
+        closegraph();
+    } catch (std::exception& e) {
+        std::ofstream ofs("./log.txt");
+        ofs << e.what() << std::endl;
     }
-    closegraph();
     return 0;
 }

@@ -33,6 +33,16 @@ struct hit_record {
     hit_record();
 };
 
+struct Triangle {
+    euclidean_coordinate v0, v1, v2;
+    euclidean_coordinate normal;
+    std::shared_ptr<material> mat;
+    Triangle(
+        const euclidean_coordinate& v0,
+        const euclidean_coordinate& v1,
+        const euclidean_coordinate& v2,
+        std::shared_ptr<material> mat);
+};
 class hittable {
 public:
     virtual ~hittable() = default;
@@ -40,6 +50,7 @@ public:
         const ray& r, float t_min, float t_max, hit_record& rec) const = 0;
     virtual aabb bounding_box() const = 0;
     virtual bool any_hit(const ray& r, float t_min, float t_max) const = 0;
+    virtual std::vector<Triangle> triangulate() const;
 };
 
 class sphere : public hittable {
@@ -52,6 +63,7 @@ public:
         const ray& r, float t_min, float t_max, hit_record& rec) const override;
     virtual aabb bounding_box() const override;
     virtual bool any_hit(const ray& r, float t_min, float t_max) const override;
+    virtual std::vector<Triangle> triangulate() const override;
 
 private:
     euclidean_coordinate center_;
@@ -70,11 +82,10 @@ public:
         const ray& r, float t_min, float t_max, hit_record& rec) const override;
     virtual aabb bounding_box() const override;
     virtual bool any_hit(const ray& r, float t_min, float t_max) const override;
+    virtual std::vector<Triangle> triangulate() const override;
 
 private:
-    euclidean_coordinate v0_, v1_, v2_;
-    euclidean_coordinate normal_;
-    std::shared_ptr<material> mat_;
+    Triangle tri_;
 };
 
 class plane : public hittable {
@@ -87,6 +98,7 @@ public:
         const ray& r, float t_min, float t_max, hit_record& rec) const override;
     virtual aabb bounding_box() const override;
     virtual bool any_hit(const ray& r, float t_min, float t_max) const override;
+    virtual std::vector<Triangle> triangulate() const override;
 
 private:
     euclidean_coordinate point_;
@@ -101,9 +113,10 @@ public:
         const ray& r, float t_min, float t_max, hit_record& rec) const override;
     virtual aabb bounding_box() const override;
     virtual bool any_hit(const ray& r, float t_min, float t_max) const override;
+    virtual std::vector<Triangle> triangulate() const override;
 
 private:
-    std::vector<std::unique_ptr<hittable>> triangles_;
+    std::vector<std::unique_ptr<triangle>> triangles_;
     aabb bbox_;
     std::shared_ptr<material> mat_;
 };

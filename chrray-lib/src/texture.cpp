@@ -176,6 +176,10 @@ bool metal::scatter(
     attenuation = albedo_;
     return true;
 }
+color metal::diffuse_color(
+    const hit_record& rec, const euclidean_coordinate& view_dir) const {
+    return albedo_;
+}
 color metal::specular_color(
     const hit_record& rec, const euclidean_coordinate& view_dir) const {
     return albedo_;

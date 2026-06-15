@@ -21,6 +21,7 @@ public:
     void rotate_yaw(float angle_deg);
     void rotate_pitch(float angle_deg);
     void rotate_roll(float angle_deg);
+    void reset_up();
 
     void set_pose(
         const euclidean_coordinate& new_origin,
@@ -32,6 +33,9 @@ public:
 
     const euclidean_coordinate& origin() const;
     const euclidean_coordinate& lookat() const;
+
+    homogeneous_transform view_matrix() const;
+    homogeneous_transform projection_matrix() const;
 
 private:
     euclidean_coordinate origin_;
@@ -45,6 +49,5 @@ private:
     mutable euclidean_coordinate forward_, right_, up_;
 
     void update_axes() const;
-    void update_lookat_from_axes();
 };
 }  // namespace chrray

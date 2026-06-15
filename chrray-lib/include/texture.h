@@ -89,6 +89,9 @@ public:
         const hit_record& rec,
         color& attenuation,
         ray& out) const override;
+    virtual color diffuse_color(
+        const hit_record& rec,
+        const euclidean_coordinate& view_dir) const override;
     virtual color specular_color(
         const hit_record& rec,
         const euclidean_coordinate& view_dir) const override;

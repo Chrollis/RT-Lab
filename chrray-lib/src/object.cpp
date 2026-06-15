@@ -19,6 +19,19 @@ euclidean_coordinate ray::at(float t) const {
 }
 
 hit_record::hit_record() : t(0.0f), u(0.0f), v(0.0f) {}
+Triangle::Triangle(
+    const euclidean_coordinate& v0,
+    const euclidean_coordinate& v1,
+    const euclidean_coordinate& v2,
+    std::shared_ptr<material> mat)
+    : v0(v0), v1(v1), v2(v2), mat(mat) {
+    euclidean_coordinate e1 = v1 - v0;
+    euclidean_coordinate e2 = v2 - v0;
+    normal = e1.cross(e2).normalize();
+}
+std::vector<Triangle> hittable::triangulate() const {
+    return {};
+}
 
 sphere::sphere(
     const euclidean_coordinate& center,
@@ -76,28 +89,59 @@ bool sphere::any_hit(const ray& r, float t_min, float t_max) const {
     }
     return true;
 }
+std::vector<Triangle> sphere::triangulate() const {
+    std::vector<Triangle> tris;
+    const int stacks = 16;
+    const int slices = 32;
+    for (int i = 0; i < stacks; ++i) {
+        float theta1 = pi * i / stacks;
+        float theta2 = pi * (i + 1) / stacks;
+        for (int j = 0; j < slices; ++j) {
+            float phi1 = 2 * pi * j / slices;
+            float phi2 = 2 * pi * (j + 1) / slices;
+            auto vert = [&](float theta, float phi) -> euclidean_coordinate {
+                float x = sinf(theta) * cosf(phi);
+                float y = cosf(theta);
+                float z = sinf(theta) * sinf(phi);
+                return center_ + radius_ * euclidean_coordinate(x, y, z);
+            };
+            euclidean_coordinate v00 = vert(theta1, phi1);
+            euclidean_coordinate v01 = vert(theta1, phi2);
+            euclidean_coordinate v10 = vert(theta2, phi1);
+            euclidean_coordinate v11 = vert(theta2, phi2);
+            auto add_triangle = [&](const euclidean_coordinate& a,
+                                    const euclidean_coordinate& b,
+                                    const euclidean_coordinate& c) {
+                euclidean_coordinate normal = (b - a).cross(c - a);
+                if (normal.length() > 1e-6f) {
+                    tris.emplace_back(a, b, c, mat_);
+                }
+            };
+
+            add_triangle(v00, v01, v10);
+            add_triangle(v01, v11, v10);
+        }
+    }
+    return tris;
+}
 
 triangle::triangle(
     const euclidean_coordinate& v0,
     const euclidean_coordinate& v1,
     const euclidean_coordinate& v2,
     std::shared_ptr<material> mat)
-    : v0_(v0), v1_(v1), v2_(v2), mat_(mat) {
-    euclidean_coordinate e1 = v1_ - v0_;
-    euclidean_coordinate e2 = v2_ - v0_;
-    normal_ = e1.cross(e2).normalize();
-}
+    : tri_(v0, v1, v2, mat) {}
 
 bool triangle::intersect(
     const ray& r, float t_min, float t_max, hit_record& rec) const {
-    euclidean_coordinate e1 = v1_ - v0_;
-    euclidean_coordinate e2 = v2_ - v0_;
+    euclidean_coordinate e1 = tri_.v1 - tri_.v0;
+    euclidean_coordinate e2 = tri_.v2 - tri_.v0;
     euclidean_coordinate pvec = r.direction().cross(e2);
     float det = e1.dot(pvec);
     if (fabs(det) < eps) return false;
 
     float inv_det = 1.0f / det;
-    euclidean_coordinate tvec = r.origin() - v0_;
+    euclidean_coordinate tvec = r.origin() - tri_.v0;
     float u = tvec.dot(pvec) * inv_det;
     if (u < 0.0f || u > 1.0f) return false;
 
@@ -110,35 +154,35 @@ bool triangle::intersect(
 
     rec.t = t;
     rec.p = r.at(t);
-    rec.n = normal_;
+    rec.n = tri_.normal;
     if (rec.n.dot(r.direction()) > 0) {
         rec.n = rec.n * (-1.0f);
     }
-    rec.mat = mat_;
+    rec.mat = tri_.mat;
     rec.u = u;
     rec.v = v;
     return true;
 }
 aabb triangle::bounding_box() const {
     euclidean_coordinate min(
-        std::min({v0_.x(), v1_.x(), v2_.x()}),
-        std::min({v0_.y(), v1_.y(), v2_.y()}),
-        std::min({v0_.z(), v1_.z(), v2_.z()}));
+        std::min({tri_.v0.x(), tri_.v1.x(), tri_.v2.x()}),
+        std::min({tri_.v0.y(), tri_.v1.y(), tri_.v2.y()}),
+        std::min({tri_.v0.z(), tri_.v1.z(), tri_.v2.z()}));
     euclidean_coordinate max(
-        std::max({v0_.x(), v1_.x(), v2_.x()}),
-        std::max({v0_.y(), v1_.y(), v2_.y()}),
-        std::max({v0_.z(), v1_.z(), v2_.z()}));
+        std::max({tri_.v0.x(), tri_.v1.x(), tri_.v2.x()}),
+        std::max({tri_.v0.y(), tri_.v1.y(), tri_.v2.y()}),
+        std::max({tri_.v0.z(), tri_.v1.z(), tri_.v2.z()}));
     return aabb(min, max);
 }
 bool triangle::any_hit(const ray& r, float t_min, float t_max) const {
-    euclidean_coordinate e1 = v1_ - v0_;
-    euclidean_coordinate e2 = v2_ - v0_;
+    euclidean_coordinate e1 = tri_.v1 - tri_.v0;
+    euclidean_coordinate e2 = tri_.v2 - tri_.v0;
     euclidean_coordinate pvec = r.direction().cross(e2);
     float det = e1.dot(pvec);
     if (fabs(det) < eps) return false;
 
     float inv_det = 1.0f / det;
-    euclidean_coordinate tvec = r.origin() - v0_;
+    euclidean_coordinate tvec = r.origin() - tri_.v0;
     float u = tvec.dot(pvec) * inv_det;
     if (u < 0.0f || u > 1.0f) return false;
 
@@ -148,6 +192,10 @@ bool triangle::any_hit(const ray& r, float t_min, float t_max) const {
 
     float t = e2.dot(qvec) * inv_det;
     return (t >= t_min && t <= t_max);
+}
+std::vector<Triangle> triangle::triangulate() const {
+    std::vector<Triangle> tris = {tri_};
+    return tris;
 }
 
 plane::plane(
@@ -186,6 +234,35 @@ bool plane::any_hit(const ray& r, float t_min, float t_max) const {
     if (fabs(denom) < eps) return false;
     float t = (point_ - r.origin()).dot(normal_) / denom;
     return (t >= t_min && t <= t_max);
+}
+std::vector<Triangle> plane::triangulate() const {
+    std::vector<Triangle> tris;
+    const float half_size = 50.0f;
+    const int grid = 40;
+
+    euclidean_coordinate right = euclidean_coordinate(1, 0, 0);
+    if (fabs(normal_.dot(right)) > 0.9999f)
+        right = euclidean_coordinate(0, 0, 1);
+    euclidean_coordinate forward = right.cross(normal_).normalize();
+    right = normal_.cross(forward).normalize();
+
+    euclidean_coordinate center = point_;
+    euclidean_coordinate start =
+        center - right * half_size - forward * half_size;
+    float step = 2.0f * half_size / grid;
+
+    for (int i = 0; i < grid; ++i) {
+        for (int j = 0; j < grid; ++j) {
+            euclidean_coordinate p00 =
+                start + right * (i * step) + forward * (j * step);
+            euclidean_coordinate p10 = p00 + right * step;
+            euclidean_coordinate p01 = p00 + forward * step;
+            euclidean_coordinate p11 = p00 + right * step + forward * step;
+            tris.emplace_back(p00, p10, p11, mat_);
+            tris.emplace_back(p00, p11, p01, mat_);
+        }
+    }
+    return tris;
 }
 
 mesh::mesh(const std::filesystem::path& filepath, std::shared_ptr<material> mat)
@@ -256,5 +333,12 @@ bool mesh::any_hit(const ray& r, float t_min, float t_max) const {
         if (tri->any_hit(r, t_min, t_max)) return true;
     }
     return false;
+}
+std::vector<Triangle> mesh::triangulate() const {
+    std::vector<Triangle> tris;
+    for (const auto& t : triangles_) {
+        tris.push_back(t->triangulate()[0]);
+    }
+    return tris;
 }
 }  // namespace chrray

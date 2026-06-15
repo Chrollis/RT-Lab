@@ -16,9 +16,7 @@ public:
 
     virtual bool intersect(
         const ray& r, float t_min, float t_max, hit_record& rec) const override;
-
     virtual bool any_hit(const ray& r, float t_min, float t_max) const override;
-
     virtual aabb bounding_box() const override;
 
 private:
