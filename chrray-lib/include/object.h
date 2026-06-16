@@ -1,4 +1,5 @@
 #pragma once
+#include <immintrin.h>
 #include <matrix.h>
 #include <utils.h>
 #include <filesystem>
@@ -43,6 +44,29 @@ struct Triangle {
         const euclidean_coordinate& v2,
         std::shared_ptr<material> mat);
 };
+
+struct ray8 {
+    alignas(32) __m256 ox, oy, oz;
+    alignas(32) __m256 dx, dy, dz;
+    alignas(32) __m256 tmin, tmax;
+    __m256i active;
+
+    ray8() = default;
+    ray8(const ray* rays, const __m256i& mask);
+};
+
+struct hit_record8 {
+    alignas(32) __m256 t;
+    alignas(32) __m256 px, py, pz;
+    alignas(32) __m256 nx, ny, nz;
+    alignas(32) __m256 u, v;
+    alignas(32) int mat_id[8];
+    __m256i active;
+
+    hit_record8() = default;
+    void clear() { active = _mm256_setzero_si256(); }
+};
+
 class hittable {
 public:
     virtual ~hittable() = default;
@@ -51,6 +75,11 @@ public:
     virtual aabb bounding_box() const = 0;
     virtual bool any_hit(const ray& r, float t_min, float t_max) const = 0;
     virtual std::vector<Triangle> triangulate() const;
+    virtual void intersect8(const ray8& rays, hit_record8& recs) const;
+    virtual __m256i any_hit8(const ray8& rays) const;
+
+protected:
+    int mat_index_ = 0;
 };
 
 class sphere : public hittable {
@@ -64,6 +93,8 @@ public:
     virtual aabb bounding_box() const override;
     virtual bool any_hit(const ray& r, float t_min, float t_max) const override;
     virtual std::vector<Triangle> triangulate() const override;
+    virtual void intersect8(const ray8& rays, hit_record8& recs) const override;
+    virtual __m256i any_hit8(const ray8& rays) const override;
 
 private:
     euclidean_coordinate center_;
@@ -83,6 +114,8 @@ public:
     virtual aabb bounding_box() const override;
     virtual bool any_hit(const ray& r, float t_min, float t_max) const override;
     virtual std::vector<Triangle> triangulate() const override;
+    virtual void intersect8(const ray8& rays, hit_record8& recs) const override;
+    virtual __m256i any_hit8(const ray8& rays) const override;
 
 private:
     Triangle tri_;
@@ -99,6 +132,8 @@ public:
     virtual aabb bounding_box() const override;
     virtual bool any_hit(const ray& r, float t_min, float t_max) const override;
     virtual std::vector<Triangle> triangulate() const override;
+    virtual void intersect8(const ray8& rays, hit_record8& recs) const override;
+    virtual __m256i any_hit8(const ray8& rays) const override;
 
 private:
     euclidean_coordinate point_;
@@ -114,6 +149,8 @@ public:
     virtual aabb bounding_box() const override;
     virtual bool any_hit(const ray& r, float t_min, float t_max) const override;
     virtual std::vector<Triangle> triangulate() const override;
+    virtual void intersect8(const ray8& rays, hit_record8& recs) const override;
+    virtual __m256i any_hit8(const ray8& rays) const override;
 
 private:
     std::vector<std::unique_ptr<triangle>> triangles_;

@@ -33,6 +33,123 @@ std::vector<Triangle> hittable::triangulate() const {
     return {};
 }
 
+ray8::ray8(const ray* rays, const __m256i& mask) : active(mask) {
+    alignas(32) float ox[8], oy[8], oz[8];
+    alignas(32) float dx[8], dy[8], dz[8];
+    alignas(32) float tmin[8], tmax[8];
+
+    for (int i = 0; i < 8; ++i) {
+        int bit = 1 << i;
+        if (_mm256_movemask_epi8(
+                _mm256_and_si256(mask, _mm256_set1_epi32(bit))) != 0) {
+            ox[i] = rays[i].origin().x();
+            oy[i] = rays[i].origin().y();
+            oz[i] = rays[i].origin().z();
+            dx[i] = rays[i].direction().x();
+            dy[i] = rays[i].direction().y();
+            dz[i] = rays[i].direction().z();
+            tmin[i] = 0.0f;
+            tmax[i] = INFINITY;
+        } else {
+            ox[i] = oy[i] = oz[i] = dx[i] = dy[i] = dz[i] = 0.0f;
+            tmin[i] = 0.0f;
+            tmax[i] = -1.0f;
+        }
+    }
+    this->ox = _mm256_load_ps(ox);
+    this->oy = _mm256_load_ps(oy);
+    this->oz = _mm256_load_ps(oz);
+    this->dx = _mm256_load_ps(dx);
+    this->dy = _mm256_load_ps(dy);
+    this->dz = _mm256_load_ps(dz);
+    this->tmin = _mm256_load_ps(tmin);
+    this->tmax = _mm256_load_ps(tmax);
+}
+void hittable::intersect8(const ray8& rays, hit_record8& recs) const {
+    recs.clear();
+    alignas(32) float t_vals[8], px_vals[8], py_vals[8], pz_vals[8];
+    alignas(32) float nx_vals[8], ny_vals[8], nz_vals[8];
+    alignas(32) float u_vals[8], v_vals[8];
+    int mat_ids[8] = {0};
+
+    alignas(32) float ox_arr[8], oy_arr[8], oz_arr[8];
+    alignas(32) float dx_arr[8], dy_arr[8], dz_arr[8];
+    alignas(32) float tmin_arr[8], tmax_arr[8];
+    _mm256_store_ps(ox_arr, rays.ox);
+    _mm256_store_ps(oy_arr, rays.oy);
+    _mm256_store_ps(oz_arr, rays.oz);
+    _mm256_store_ps(dx_arr, rays.dx);
+    _mm256_store_ps(dy_arr, rays.dy);
+    _mm256_store_ps(dz_arr, rays.dz);
+    _mm256_store_ps(tmin_arr, rays.tmin);
+    _mm256_store_ps(tmax_arr, rays.tmax);
+
+    __m256i active = _mm256_setzero_si256();
+    for (int i = 0; i < 8; ++i) {
+        if (_mm256_movemask_epi8(
+                _mm256_and_si256(rays.active, _mm256_set1_epi32(1 << i))) == 0)
+            continue;
+
+        ray r(
+            euclidean_coordinate(ox_arr[i], oy_arr[i], oz_arr[i]),
+            euclidean_coordinate(dx_arr[i], dy_arr[i], dz_arr[i]));
+        hit_record rec;
+        if (intersect(r, tmin_arr[i], tmax_arr[i], rec)) {
+            t_vals[i] = rec.t;
+            px_vals[i] = rec.p.x();
+            py_vals[i] = rec.p.y();
+            pz_vals[i] = rec.p.z();
+            nx_vals[i] = rec.n.x();
+            ny_vals[i] = rec.n.y();
+            nz_vals[i] = rec.n.z();
+            u_vals[i] = rec.u;
+            v_vals[i] = rec.v;
+            mat_ids[i] = 0;
+            active = _mm256_or_si256(active, _mm256_set1_epi32(1 << i));
+        }
+    }
+
+    recs.t = _mm256_load_ps(t_vals);
+    recs.px = _mm256_load_ps(px_vals);
+    recs.py = _mm256_load_ps(py_vals);
+    recs.pz = _mm256_load_ps(pz_vals);
+    recs.nx = _mm256_load_ps(nx_vals);
+    recs.ny = _mm256_load_ps(ny_vals);
+    recs.nz = _mm256_load_ps(nz_vals);
+    recs.u = _mm256_load_ps(u_vals);
+    recs.v = _mm256_load_ps(v_vals);
+    for (int i = 0; i < 8; ++i) recs.mat_id[i] = mat_ids[i];
+    recs.active = active;
+}
+
+__m256i hittable::any_hit8(const ray8& rays) const {
+    alignas(32) float ox_arr[8], oy_arr[8], oz_arr[8];
+    alignas(32) float dx_arr[8], dy_arr[8], dz_arr[8];
+    alignas(32) float tmin_arr[8], tmax_arr[8];
+    _mm256_store_ps(ox_arr, rays.ox);
+    _mm256_store_ps(oy_arr, rays.oy);
+    _mm256_store_ps(oz_arr, rays.oz);
+    _mm256_store_ps(dx_arr, rays.dx);
+    _mm256_store_ps(dy_arr, rays.dy);
+    _mm256_store_ps(dz_arr, rays.dz);
+    _mm256_store_ps(tmin_arr, rays.tmin);
+    _mm256_store_ps(tmax_arr, rays.tmax);
+
+    __m256i result = _mm256_setzero_si256();
+    for (int i = 0; i < 8; ++i) {
+        if (_mm256_movemask_epi8(
+                _mm256_and_si256(rays.active, _mm256_set1_epi32(1 << i))) == 0)
+            continue;
+        ray r(
+            euclidean_coordinate(ox_arr[i], oy_arr[i], oz_arr[i]),
+            euclidean_coordinate(dx_arr[i], dy_arr[i], dz_arr[i]));
+        if (any_hit(r, tmin_arr[i], tmax_arr[i])) {
+            result = _mm256_or_si256(result, _mm256_set1_epi32(1 << i));
+        }
+    }
+    return result;
+}
+
 sphere::sphere(
     const euclidean_coordinate& center,
     float radius,
@@ -124,6 +241,128 @@ std::vector<Triangle> sphere::triangulate() const {
     }
     return tris;
 }
+void sphere::intersect8(const ray8& rays, hit_record8& recs) const {
+    __m256 cx = _mm256_set1_ps(center_.x());
+    __m256 cy = _mm256_set1_ps(center_.y());
+    __m256 cz = _mm256_set1_ps(center_.z());
+    __m256 r = _mm256_set1_ps(radius_);
+
+    __m256 ocx = _mm256_sub_ps(rays.ox, cx);
+    __m256 ocy = _mm256_sub_ps(rays.oy, cy);
+    __m256 ocz = _mm256_sub_ps(rays.oz, cz);
+
+    __m256 a = _mm256_fmadd_ps(
+        rays.dx, rays.dx,
+        _mm256_fmadd_ps(rays.dy, rays.dy, _mm256_mul_ps(rays.dz, rays.dz)));
+
+    __m256 b = _mm256_mul_ps(
+        _mm256_set1_ps(2.0f),
+        _mm256_fmadd_ps(
+            ocx, rays.dx,
+            _mm256_fmadd_ps(ocy, rays.dy, _mm256_mul_ps(ocz, rays.dz))));
+
+    __m256 c = _mm256_sub_ps(
+        _mm256_fmadd_ps(
+            ocx, ocx, _mm256_fmadd_ps(ocy, ocy, _mm256_mul_ps(ocz, ocz))),
+        _mm256_mul_ps(r, r));
+
+    __m256 disc = _mm256_sub_ps(
+        _mm256_mul_ps(b, b),
+        _mm256_mul_ps(_mm256_set1_ps(4.0f), _mm256_mul_ps(a, c)));
+
+    __m256 disc_pos = _mm256_max_ps(disc, _mm256_setzero_ps());
+    __m256 sqrt_disc = _mm256_sqrt_ps(disc_pos);
+
+    __m256 two_a = _mm256_mul_ps(_mm256_set1_ps(2.0f), a);
+    __m256 neg_b = _mm256_sub_ps(_mm256_setzero_ps(), b);
+    __m256 t1 = _mm256_div_ps(_mm256_sub_ps(neg_b, sqrt_disc), two_a);
+    __m256 t2 = _mm256_div_ps(_mm256_add_ps(neg_b, sqrt_disc), two_a);
+
+    __m256 tmin_vec = rays.tmin;
+    __m256 tmax_vec = rays.tmax;
+    __m256 valid1 = _mm256_and_ps(
+        _mm256_cmp_ps(t1, tmin_vec, _CMP_GE_OQ),
+        _mm256_cmp_ps(t1, tmax_vec, _CMP_LE_OQ));
+    __m256 valid2 = _mm256_and_ps(
+        _mm256_cmp_ps(t2, tmin_vec, _CMP_GE_OQ),
+        _mm256_cmp_ps(t2, tmax_vec, _CMP_LE_OQ));
+    __m256 valid = _mm256_or_ps(valid1, valid2);
+
+    __m256 t_hit = _mm256_blendv_ps(t2, t1, valid1);
+
+    __m256 px = _mm256_fmadd_ps(t_hit, rays.dx, rays.ox);
+    __m256 py = _mm256_fmadd_ps(t_hit, rays.dy, rays.oy);
+    __m256 pz = _mm256_fmadd_ps(t_hit, rays.dz, rays.oz);
+
+    __m256 nx = _mm256_div_ps(_mm256_sub_ps(px, cx), r);
+    __m256 ny = _mm256_div_ps(_mm256_sub_ps(py, cy), r);
+    __m256 nz = _mm256_div_ps(_mm256_sub_ps(pz, cz), r);
+
+    __m256 dot = _mm256_fmadd_ps(
+        nx, rays.dx, _mm256_fmadd_ps(ny, rays.dy, _mm256_mul_ps(nz, rays.dz)));
+    __m256 flip = _mm256_cmp_ps(dot, _mm256_setzero_ps(), _CMP_GT_OQ);
+    nx = _mm256_blendv_ps(nx, _mm256_sub_ps(_mm256_setzero_ps(), nx), flip);
+    ny = _mm256_blendv_ps(ny, _mm256_sub_ps(_mm256_setzero_ps(), ny), flip);
+    nz = _mm256_blendv_ps(nz, _mm256_sub_ps(_mm256_setzero_ps(), nz), flip);
+
+    __m256 zero = _mm256_setzero_ps();
+
+    recs.t = t_hit;
+    recs.px = px;
+    recs.py = py;
+    recs.pz = pz;
+    recs.nx = nx;
+    recs.ny = ny;
+    recs.nz = nz;
+    recs.u = zero;
+    recs.v = zero;
+    for (int i = 0; i < 8; ++i) recs.mat_id[i] = mat_index_;
+    recs.active = _mm256_castps_si256(valid);
+}
+
+__m256i sphere::any_hit8(const ray8& rays) const {
+    __m256 cx = _mm256_set1_ps(center_.x());
+    __m256 cy = _mm256_set1_ps(center_.y());
+    __m256 cz = _mm256_set1_ps(center_.z());
+    __m256 r = _mm256_set1_ps(radius_);
+
+    __m256 ocx = _mm256_sub_ps(rays.ox, cx);
+    __m256 ocy = _mm256_sub_ps(rays.oy, cy);
+    __m256 ocz = _mm256_sub_ps(rays.oz, cz);
+
+    __m256 a = _mm256_fmadd_ps(
+        rays.dx, rays.dx,
+        _mm256_fmadd_ps(rays.dy, rays.dy, _mm256_mul_ps(rays.dz, rays.dz)));
+    __m256 b = _mm256_mul_ps(
+        _mm256_set1_ps(2.0f),
+        _mm256_fmadd_ps(
+            ocx, rays.dx,
+            _mm256_fmadd_ps(ocy, rays.dy, _mm256_mul_ps(ocz, rays.dz))));
+    __m256 c = _mm256_sub_ps(
+        _mm256_fmadd_ps(
+            ocx, ocx, _mm256_fmadd_ps(ocy, ocy, _mm256_mul_ps(ocz, ocz))),
+        _mm256_mul_ps(r, r));
+
+    __m256 disc = _mm256_sub_ps(
+        _mm256_mul_ps(b, b),
+        _mm256_mul_ps(_mm256_set1_ps(4.0f), _mm256_mul_ps(a, c)));
+    __m256 disc_pos = _mm256_max_ps(disc, _mm256_setzero_ps());
+    __m256 sqrt_disc = _mm256_sqrt_ps(disc_pos);
+    __m256 two_a = _mm256_mul_ps(_mm256_set1_ps(2.0f), a);
+    __m256 neg_b = _mm256_sub_ps(_mm256_setzero_ps(), b);
+    __m256 t1 = _mm256_div_ps(_mm256_sub_ps(neg_b, sqrt_disc), two_a);
+    __m256 t2 = _mm256_div_ps(_mm256_add_ps(neg_b, sqrt_disc), two_a);
+
+    __m256 valid1 = _mm256_and_ps(
+        _mm256_cmp_ps(t1, rays.tmin, _CMP_GE_OQ),
+        _mm256_cmp_ps(t1, rays.tmax, _CMP_LE_OQ));
+    __m256 valid2 = _mm256_and_ps(
+        _mm256_cmp_ps(t2, rays.tmin, _CMP_GE_OQ),
+        _mm256_cmp_ps(t2, rays.tmax, _CMP_LE_OQ));
+    __m256 valid = _mm256_or_ps(valid1, valid2);
+
+    return _mm256_castps_si256(valid);
+}
 
 triangle::triangle(
     const euclidean_coordinate& v0,
@@ -197,6 +436,184 @@ std::vector<Triangle> triangle::triangulate() const {
     std::vector<Triangle> tris = {tri_};
     return tris;
 }
+void triangle::intersect8(const ray8& rays, hit_record8& recs) const {
+    __m256 v0x = _mm256_set1_ps(tri_.v0.x());
+    __m256 v0y = _mm256_set1_ps(tri_.v0.y());
+    __m256 v0z = _mm256_set1_ps(tri_.v0.z());
+    __m256 v1x = _mm256_set1_ps(tri_.v1.x());
+    __m256 v1y = _mm256_set1_ps(tri_.v1.y());
+    __m256 v1z = _mm256_set1_ps(tri_.v1.z());
+    __m256 v2x = _mm256_set1_ps(tri_.v2.x());
+    __m256 v2y = _mm256_set1_ps(tri_.v2.y());
+    __m256 v2z = _mm256_set1_ps(tri_.v2.z());
+
+    __m256 e1x = _mm256_sub_ps(v1x, v0x);
+    __m256 e1y = _mm256_sub_ps(v1y, v0y);
+    __m256 e1z = _mm256_sub_ps(v1z, v0z);
+    __m256 e2x = _mm256_sub_ps(v2x, v0x);
+    __m256 e2y = _mm256_sub_ps(v2y, v0y);
+    __m256 e2z = _mm256_sub_ps(v2z, v0z);
+
+    __m256 pvecx =
+        _mm256_sub_ps(_mm256_mul_ps(rays.dy, e2z), _mm256_mul_ps(rays.dz, e2y));
+    __m256 pvecy =
+        _mm256_sub_ps(_mm256_mul_ps(rays.dz, e2x), _mm256_mul_ps(rays.dx, e2z));
+    __m256 pvecz =
+        _mm256_sub_ps(_mm256_mul_ps(rays.dx, e2y), _mm256_mul_ps(rays.dy, e2x));
+
+    __m256 det = _mm256_fmadd_ps(
+        e1x, pvecx, _mm256_fmadd_ps(e1y, pvecy, _mm256_mul_ps(e1z, pvecz)));
+
+    __m256 abs_det =
+        _mm256_and_ps(det, _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFFFFFF)));
+    __m256 valid_det = _mm256_cmp_ps(abs_det, _mm256_set1_ps(eps), _CMP_GT_OQ);
+
+    __m256 inv_det = _mm256_div_ps(_mm256_set1_ps(1.0f), det);
+
+    __m256 tvecx = _mm256_sub_ps(rays.ox, v0x);
+    __m256 tvecy = _mm256_sub_ps(rays.oy, v0y);
+    __m256 tvecz = _mm256_sub_ps(rays.oz, v0z);
+
+    __m256 u = _mm256_mul_ps(
+        _mm256_fmadd_ps(
+            tvecx, pvecx,
+            _mm256_fmadd_ps(tvecy, pvecy, _mm256_mul_ps(tvecz, pvecz))),
+        inv_det);
+
+    __m256 valid_u = _mm256_and_ps(
+        _mm256_cmp_ps(u, _mm256_setzero_ps(), _CMP_GE_OQ),
+        _mm256_cmp_ps(u, _mm256_set1_ps(1.0f), _CMP_LE_OQ));
+
+    __m256 qvecx =
+        _mm256_sub_ps(_mm256_mul_ps(tvecy, e1z), _mm256_mul_ps(tvecz, e1y));
+    __m256 qvecy =
+        _mm256_sub_ps(_mm256_mul_ps(tvecz, e1x), _mm256_mul_ps(tvecx, e1z));
+    __m256 qvecz =
+        _mm256_sub_ps(_mm256_mul_ps(tvecx, e1y), _mm256_mul_ps(tvecy, e1x));
+
+    __m256 v = _mm256_mul_ps(
+        _mm256_fmadd_ps(
+            rays.dx, qvecx,
+            _mm256_fmadd_ps(rays.dy, qvecy, _mm256_mul_ps(rays.dz, qvecz))),
+        inv_det);
+
+    __m256 valid_v = _mm256_and_ps(
+        _mm256_cmp_ps(v, _mm256_setzero_ps(), _CMP_GE_OQ),
+        _mm256_cmp_ps(_mm256_add_ps(u, v), _mm256_set1_ps(1.0f), _CMP_LE_OQ));
+
+    __m256 t = _mm256_mul_ps(
+        _mm256_fmadd_ps(
+            e2x, qvecx, _mm256_fmadd_ps(e2y, qvecy, _mm256_mul_ps(e2z, qvecz))),
+        inv_det);
+
+    __m256 valid_t = _mm256_and_ps(
+        _mm256_cmp_ps(t, rays.tmin, _CMP_GE_OQ),
+        _mm256_cmp_ps(t, rays.tmax, _CMP_LE_OQ));
+
+    __m256 valid = _mm256_and_ps(
+        valid_det, _mm256_and_ps(valid_u, _mm256_and_ps(valid_v, valid_t)));
+
+    __m256 px = _mm256_fmadd_ps(t, rays.dx, rays.ox);
+    __m256 py = _mm256_fmadd_ps(t, rays.dy, rays.oy);
+    __m256 pz = _mm256_fmadd_ps(t, rays.dz, rays.oz);
+
+    __m256 nx = _mm256_set1_ps(tri_.normal.x());
+    __m256 ny = _mm256_set1_ps(tri_.normal.y());
+    __m256 nz = _mm256_set1_ps(tri_.normal.z());
+
+    __m256 dot_nd = _mm256_fmadd_ps(
+        nx, rays.dx, _mm256_fmadd_ps(ny, rays.dy, _mm256_mul_ps(nz, rays.dz)));
+    __m256 flip = _mm256_cmp_ps(dot_nd, _mm256_setzero_ps(), _CMP_GT_OQ);
+    nx = _mm256_blendv_ps(nx, _mm256_sub_ps(_mm256_setzero_ps(), nx), flip);
+    ny = _mm256_blendv_ps(ny, _mm256_sub_ps(_mm256_setzero_ps(), ny), flip);
+    nz = _mm256_blendv_ps(nz, _mm256_sub_ps(_mm256_setzero_ps(), nz), flip);
+
+    recs.t = t;
+    recs.px = px;
+    recs.py = py;
+    recs.pz = pz;
+    recs.nx = nx;
+    recs.ny = ny;
+    recs.nz = nz;
+    recs.u = u;
+    recs.v = v;
+    for (int i = 0; i < 8; ++i) recs.mat_id[i] = mat_index_;
+    recs.active = _mm256_castps_si256(valid);
+}
+
+__m256i triangle::any_hit8(const ray8& rays) const {
+    __m256 v0x = _mm256_set1_ps(tri_.v0.x());
+    __m256 v0y = _mm256_set1_ps(tri_.v0.y());
+    __m256 v0z = _mm256_set1_ps(tri_.v0.z());
+    __m256 v1x = _mm256_set1_ps(tri_.v1.x());
+    __m256 v1y = _mm256_set1_ps(tri_.v1.y());
+    __m256 v1z = _mm256_set1_ps(tri_.v1.z());
+    __m256 v2x = _mm256_set1_ps(tri_.v2.x());
+    __m256 v2y = _mm256_set1_ps(tri_.v2.y());
+    __m256 v2z = _mm256_set1_ps(tri_.v2.z());
+
+    __m256 e1x = _mm256_sub_ps(v1x, v0x);
+    __m256 e1y = _mm256_sub_ps(v1y, v0y);
+    __m256 e1z = _mm256_sub_ps(v1z, v0z);
+    __m256 e2x = _mm256_sub_ps(v2x, v0x);
+    __m256 e2y = _mm256_sub_ps(v2y, v0y);
+    __m256 e2z = _mm256_sub_ps(v2z, v0z);
+
+    __m256 pvecx =
+        _mm256_sub_ps(_mm256_mul_ps(rays.dy, e2z), _mm256_mul_ps(rays.dz, e2y));
+    __m256 pvecy =
+        _mm256_sub_ps(_mm256_mul_ps(rays.dz, e2x), _mm256_mul_ps(rays.dx, e2z));
+    __m256 pvecz =
+        _mm256_sub_ps(_mm256_mul_ps(rays.dx, e2y), _mm256_mul_ps(rays.dy, e2x));
+
+    __m256 det = _mm256_fmadd_ps(
+        e1x, pvecx, _mm256_fmadd_ps(e1y, pvecy, _mm256_mul_ps(e1z, pvecz)));
+    __m256 abs_det =
+        _mm256_and_ps(det, _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFFFFFF)));
+    __m256 valid_det = _mm256_cmp_ps(abs_det, _mm256_set1_ps(eps), _CMP_GT_OQ);
+    __m256 inv_det = _mm256_div_ps(_mm256_set1_ps(1.0f), det);
+
+    __m256 tvecx = _mm256_sub_ps(rays.ox, v0x);
+    __m256 tvecy = _mm256_sub_ps(rays.oy, v0y);
+    __m256 tvecz = _mm256_sub_ps(rays.oz, v0z);
+
+    __m256 u = _mm256_mul_ps(
+        _mm256_fmadd_ps(
+            tvecx, pvecx,
+            _mm256_fmadd_ps(tvecy, pvecy, _mm256_mul_ps(tvecz, pvecz))),
+        inv_det);
+    __m256 valid_u = _mm256_and_ps(
+        _mm256_cmp_ps(u, _mm256_setzero_ps(), _CMP_GE_OQ),
+        _mm256_cmp_ps(u, _mm256_set1_ps(1.0f), _CMP_LE_OQ));
+
+    __m256 qvecx =
+        _mm256_sub_ps(_mm256_mul_ps(tvecy, e1z), _mm256_mul_ps(tvecz, e1y));
+    __m256 qvecy =
+        _mm256_sub_ps(_mm256_mul_ps(tvecz, e1x), _mm256_mul_ps(tvecx, e1z));
+    __m256 qvecz =
+        _mm256_sub_ps(_mm256_mul_ps(tvecx, e1y), _mm256_mul_ps(tvecy, e1x));
+
+    __m256 v = _mm256_mul_ps(
+        _mm256_fmadd_ps(
+            rays.dx, qvecx,
+            _mm256_fmadd_ps(rays.dy, qvecy, _mm256_mul_ps(rays.dz, qvecz))),
+        inv_det);
+    __m256 valid_v = _mm256_and_ps(
+        _mm256_cmp_ps(v, _mm256_setzero_ps(), _CMP_GE_OQ),
+        _mm256_cmp_ps(_mm256_add_ps(u, v), _mm256_set1_ps(1.0f), _CMP_LE_OQ));
+
+    __m256 t = _mm256_mul_ps(
+        _mm256_fmadd_ps(
+            e2x, qvecx, _mm256_fmadd_ps(e2y, qvecy, _mm256_mul_ps(e2z, qvecz))),
+        inv_det);
+    __m256 valid_t = _mm256_and_ps(
+        _mm256_cmp_ps(t, rays.tmin, _CMP_GE_OQ),
+        _mm256_cmp_ps(t, rays.tmax, _CMP_LE_OQ));
+
+    __m256 valid = _mm256_and_ps(
+        valid_det, _mm256_and_ps(valid_u, _mm256_and_ps(valid_v, valid_t)));
+    return _mm256_castps_si256(valid);
+}
 
 plane::plane(
     const euclidean_coordinate& point,
@@ -263,6 +680,88 @@ std::vector<Triangle> plane::triangulate() const {
         }
     }
     return tris;
+}
+void plane::intersect8(const ray8& rays, hit_record8& recs) const {
+    __m256 nx = _mm256_set1_ps(normal_.x());
+    __m256 ny = _mm256_set1_ps(normal_.y());
+    __m256 nz = _mm256_set1_ps(normal_.z());
+    __m256 px = _mm256_set1_ps(point_.x());
+    __m256 py = _mm256_set1_ps(point_.y());
+    __m256 pz = _mm256_set1_ps(point_.z());
+
+    __m256 denom = _mm256_fmadd_ps(
+        rays.dx, nx, _mm256_fmadd_ps(rays.dy, ny, _mm256_mul_ps(rays.dz, nz)));
+    __m256 abs_denom = _mm256_and_ps(
+        denom, _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFFFFFF)));
+    __m256 valid_denom =
+        _mm256_cmp_ps(abs_denom, _mm256_set1_ps(eps), _CMP_GT_OQ);
+
+    __m256 t = _mm256_div_ps(
+        _mm256_fmadd_ps(
+            _mm256_sub_ps(px, rays.ox), nx,
+            _mm256_fmadd_ps(
+                _mm256_sub_ps(py, rays.oy), ny,
+                _mm256_mul_ps(_mm256_sub_ps(pz, rays.oz), nz))),
+        denom);
+
+    __m256 valid_t = _mm256_and_ps(
+        _mm256_cmp_ps(t, rays.tmin, _CMP_GE_OQ),
+        _mm256_cmp_ps(t, rays.tmax, _CMP_LE_OQ));
+    __m256 valid = _mm256_and_ps(valid_denom, valid_t);
+
+    __m256 hitx = _mm256_fmadd_ps(t, rays.dx, rays.ox);
+    __m256 hity = _mm256_fmadd_ps(t, rays.dy, rays.oy);
+    __m256 hitz = _mm256_fmadd_ps(t, rays.dz, rays.oz);
+
+    __m256 dot_nd = _mm256_fmadd_ps(
+        nx, rays.dx, _mm256_fmadd_ps(ny, rays.dy, _mm256_mul_ps(nz, rays.dz)));
+    __m256 flip = _mm256_cmp_ps(dot_nd, _mm256_setzero_ps(), _CMP_GT_OQ);
+    __m256 res_nx =
+        _mm256_blendv_ps(nx, _mm256_sub_ps(_mm256_setzero_ps(), nx), flip);
+    __m256 res_ny =
+        _mm256_blendv_ps(ny, _mm256_sub_ps(_mm256_setzero_ps(), ny), flip);
+    __m256 res_nz =
+        _mm256_blendv_ps(nz, _mm256_sub_ps(_mm256_setzero_ps(), nz), flip);
+
+    recs.t = t;
+    recs.px = hitx;
+    recs.py = hity;
+    recs.pz = hitz;
+    recs.nx = res_nx;
+    recs.ny = res_ny;
+    recs.nz = res_nz;
+    recs.u = _mm256_setzero_ps();
+    recs.v = _mm256_setzero_ps();
+    for (int i = 0; i < 8; ++i) recs.mat_id[i] = mat_index_;
+    recs.active = _mm256_castps_si256(valid);
+}
+
+__m256i plane::any_hit8(const ray8& rays) const {
+    __m256 nx = _mm256_set1_ps(normal_.x());
+    __m256 ny = _mm256_set1_ps(normal_.y());
+    __m256 nz = _mm256_set1_ps(normal_.z());
+    __m256 px = _mm256_set1_ps(point_.x());
+    __m256 py = _mm256_set1_ps(point_.y());
+    __m256 pz = _mm256_set1_ps(point_.z());
+
+    __m256 denom = _mm256_fmadd_ps(
+        rays.dx, nx, _mm256_fmadd_ps(rays.dy, ny, _mm256_mul_ps(rays.dz, nz)));
+    __m256 abs_denom = _mm256_and_ps(
+        denom, _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFFFFFF)));
+    __m256 valid_denom =
+        _mm256_cmp_ps(abs_denom, _mm256_set1_ps(eps), _CMP_GT_OQ);
+    __m256 t = _mm256_div_ps(
+        _mm256_fmadd_ps(
+            _mm256_sub_ps(px, rays.ox), nx,
+            _mm256_fmadd_ps(
+                _mm256_sub_ps(py, rays.oy), ny,
+                _mm256_mul_ps(_mm256_sub_ps(pz, rays.oz), nz))),
+        denom);
+    __m256 valid_t = _mm256_and_ps(
+        _mm256_cmp_ps(t, rays.tmin, _CMP_GE_OQ),
+        _mm256_cmp_ps(t, rays.tmax, _CMP_LE_OQ));
+    __m256 valid = _mm256_and_ps(valid_denom, valid_t);
+    return _mm256_castps_si256(valid);
 }
 
 mesh::mesh(const std::filesystem::path& filepath, std::shared_ptr<material> mat)
@@ -340,5 +839,80 @@ std::vector<Triangle> mesh::triangulate() const {
         tris.push_back(t->triangulate()[0]);
     }
     return tris;
+}
+void mesh::intersect8(const ray8& rays, hit_record8& recs) const {
+    recs.clear();
+    if (triangles_.empty()) return;
+
+    alignas(32) float best_t[8];
+    alignas(32) float best_px[8], best_py[8], best_pz[8];
+    alignas(32) float best_nx[8], best_ny[8], best_nz[8];
+    alignas(32) float best_u[8], best_v[8];
+    int best_mat_id[8];
+    __m256i best_active = _mm256_setzero_si256();
+
+    for (int i = 0; i < 8; ++i) best_t[i] = INFINITY;
+
+    for (const auto& tri : triangles_) {
+        hit_record8 temp;
+        tri->intersect8(rays, temp);
+
+        alignas(32) float temp_t[8], temp_px[8], temp_py[8], temp_pz[8];
+        alignas(32) float temp_nx[8], temp_ny[8], temp_nz[8];
+        alignas(32) float temp_u[8], temp_v[8];
+        int temp_mat_id[8];
+        alignas(32) int temp_active[8];
+
+        _mm256_store_ps(temp_t, temp.t);
+        _mm256_store_ps(temp_px, temp.px);
+        _mm256_store_ps(temp_py, temp.py);
+        _mm256_store_ps(temp_pz, temp.pz);
+        _mm256_store_ps(temp_nx, temp.nx);
+        _mm256_store_ps(temp_ny, temp.ny);
+        _mm256_store_ps(temp_nz, temp.nz);
+        _mm256_store_ps(temp_u, temp.u);
+        _mm256_store_ps(temp_v, temp.v);
+        for (int i = 0; i < 8; ++i) temp_mat_id[i] = temp.mat_id[i];
+        _mm256_store_si256((__m256i*)temp_active, temp.active);
+
+        for (int i = 0; i < 8; ++i) {
+            if (temp_active[i] && temp_t[i] < best_t[i]) {
+                best_t[i] = temp_t[i];
+                best_px[i] = temp_px[i];
+                best_py[i] = temp_py[i];
+                best_pz[i] = temp_pz[i];
+                best_nx[i] = temp_nx[i];
+                best_ny[i] = temp_ny[i];
+                best_nz[i] = temp_nz[i];
+                best_u[i] = temp_u[i];
+                best_v[i] = temp_v[i];
+                best_mat_id[i] = temp_mat_id[i];
+
+                best_active =
+                    _mm256_or_si256(best_active, _mm256_set1_epi32(1 << i));
+            }
+        }
+    }
+
+    recs.t = _mm256_load_ps(best_t);
+    recs.px = _mm256_load_ps(best_px);
+    recs.py = _mm256_load_ps(best_py);
+    recs.pz = _mm256_load_ps(best_pz);
+    recs.nx = _mm256_load_ps(best_nx);
+    recs.ny = _mm256_load_ps(best_ny);
+    recs.nz = _mm256_load_ps(best_nz);
+    recs.u = _mm256_load_ps(best_u);
+    recs.v = _mm256_load_ps(best_v);
+    for (int i = 0; i < 8; ++i) recs.mat_id[i] = best_mat_id[i];
+    recs.active = best_active;
+}
+
+__m256i mesh::any_hit8(const ray8& rays) const {
+    __m256i result = _mm256_setzero_si256();
+    for (const auto& tri : triangles_) {
+        result = _mm256_or_si256(result, tri->any_hit8(rays));
+        if (_mm256_movemask_epi8(result) == 0xFF) break;
+    }
+    return result;
 }
 }  // namespace chrray
