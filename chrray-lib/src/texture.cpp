@@ -10,9 +10,9 @@ color::color(float r, float g, float b, float a) {
     this->a = std::clamp(a, 0.0f, 1.0f);
 }
 color::color(const euclidean_coordinate& rgb, float a) {
-    this->r = std::clamp(rgb[0], 0.0f, 1.0f);
-    this->g = std::clamp(rgb[1], 0.0f, 1.0f);
-    this->b = std::clamp(rgb[2], 0.0f, 1.0f);
+    this->r = std::clamp(rgb.x(), 0.0f, 1.0f);
+    this->g = std::clamp(rgb.y(), 0.0f, 1.0f);
+    this->b = std::clamp(rgb.z(), 0.0f, 1.0f);
     this->a = std::clamp(a, 0.0f, 1.0f);
 }
 

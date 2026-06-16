@@ -3,12 +3,6 @@
 
 namespace chrray {
 
-static inline float center_on_axis(
-    const std::shared_ptr<hittable>& obj, int axis) {
-    aabb b = obj->bounding_box();
-    return (b.min[axis] + b.max[axis]) * 0.5f;
-}
-
 bvh_node::bvh_node(
     std::vector<std::shared_ptr<hittable>>& objects,
     size_t start,
@@ -36,7 +30,20 @@ bvh_node::bvh_node(
     auto comparator = [axis](
                           const std::shared_ptr<hittable>& a,
                           const std::shared_ptr<hittable>& b) {
-        return center_on_axis(a, axis) < center_on_axis(b, axis);
+        aabb ba = a->bounding_box();
+        aabb bb = b->bounding_box();
+        float center_a, center_b;
+        if (axis == 0) {
+            center_a = (ba.min.x() + ba.max.x()) * 0.5f;
+            center_b = (bb.min.x() + bb.max.x()) * 0.5f;
+        } else if (axis == 1) {
+            center_a = (ba.min.y() + ba.max.y()) * 0.5f;
+            center_b = (bb.min.y() + bb.max.y()) * 0.5f;
+        } else {
+            center_a = (ba.min.z() + ba.max.z()) * 0.5f;
+            center_b = (bb.min.z() + bb.max.z()) * 0.5f;
+        }
+        return center_a < center_b;
     };
     std::sort(objects.begin() + start, objects.begin() + end, comparator);
 

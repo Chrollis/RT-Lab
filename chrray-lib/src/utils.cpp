@@ -91,18 +91,44 @@ bool aabb::hit_interval(
     float& t_entry,
     float& t_exit) const {
     float t0 = t_min, t1 = t_max;
-    for (int i = 0; i < 3; ++i) {
-        float inv_d = 1.0f / dir[i];
-        if (dir[i] == 0.0f) {
-            if (origin[i] < min[i] || origin[i] > max[i]) return false;
-            continue;
+    {
+        float inv_d = 1.0f / dir.x();
+        if (dir.x() == 0.0f) {
+            if (origin.x() < min.x() || origin.x() > max.x()) return false;
+        } else {
+            float t_near = inv_d * (min.x() - origin.x());
+            float t_far = inv_d * (max.x() - origin.x());
+            if (inv_d < 0.0f) std::swap(t_near, t_far);
+            t0 = std::max(t_near, t0);
+            t1 = std::min(t_far, t1);
+            if (t0 > t1) return false;
         }
-        float t_near = inv_d * (min[i] - origin[i]);
-        float t_far = inv_d * (max[i] - origin[i]);
-        if (inv_d < 0.0f) std::swap(t_near, t_far);
-        t0 = std::max(t_near, t0);
-        t1 = std::min(t_far, t1);
-        if (t0 > t1) return false;
+    }
+    {
+        float inv_d = 1.0f / dir.y();
+        if (dir.y() == 0.0f) {
+            if (origin.y() < min.y() || origin.y() > max.y()) return false;
+        } else {
+            float t_near = inv_d * (min.y() - origin.y());
+            float t_far = inv_d * (max.y() - origin.y());
+            if (inv_d < 0.0f) std::swap(t_near, t_far);
+            t0 = std::max(t_near, t0);
+            t1 = std::min(t_far, t1);
+            if (t0 > t1) return false;
+        }
+    }
+    {
+        float inv_d = 1.0f / dir.z();
+        if (dir.z() == 0.0f) {
+            if (origin.z() < min.z() || origin.z() > max.z()) return false;
+        } else {
+            float t_near = inv_d * (min.z() - origin.z());
+            float t_far = inv_d * (max.z() - origin.z());
+            if (inv_d < 0.0f) std::swap(t_near, t_far);
+            t0 = std::max(t_near, t0);
+            t1 = std::min(t_far, t1);
+            if (t0 > t1) return false;
+        }
     }
     t_entry = t0;
     t_exit = t1;

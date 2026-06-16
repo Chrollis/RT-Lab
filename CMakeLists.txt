@@ -15,7 +15,7 @@ add_subdirectory(chrray-lib)
 
 file(GLOB SOURCE_FILES "*.cpp")
 
-add_compile_options(/utf-8 /fp:fast)
+add_compile_options(/utf-8 /fp:fast /arch:AVX2)
 add_executable(RT-Lab ${SOURCE_FILES})
 
 target_link_options(RT-Lab PRIVATE 

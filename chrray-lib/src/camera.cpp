@@ -117,24 +117,14 @@ void camera::reset_up() {
 }
 homogeneous_transform camera::view_matrix() const {
     if (!cache_valid_) update_axes();
-    homogeneous_transform V;
-    V(0, 0) = right_.x();
-    V(0, 1) = right_.y();
-    V(0, 2) = right_.z();
-    V(0, 3) = -right_.dot(origin_);
-    V(1, 0) = up_.x();
-    V(1, 1) = up_.y();
-    V(1, 2) = up_.z();
-    V(1, 3) = -up_.dot(origin_);
-    V(2, 0) = -forward_.x();
-    V(2, 1) = -forward_.y();
-    V(2, 2) = -forward_.z();
-    V(2, 3) = forward_.dot(origin_);
-    V(3, 0) = 0;
-    V(3, 1) = 0;
-    V(3, 2) = 0;
-    V(3, 3) = 1;
-    return V;
+    float tx = -right_.dot(origin_);
+    float ty = -up_.dot(origin_);
+    float tz = forward_.dot(origin_);
+    return homogeneous_transform(
+        {{right_.x(), right_.y(), right_.z(), tx},
+         {up_.x(), up_.y(), up_.z(), ty},
+         {-forward_.x(), -forward_.y(), -forward_.z(), tz},
+         {0.0f, 0.0f, 0.0f, 1.0f}});
 }
 
 homogeneous_transform camera::projection_matrix() const {
@@ -142,12 +132,14 @@ homogeneous_transform camera::projection_matrix() const {
     float aspect = aspect_;
     float n = near_plane_;
     float f_plane = far_plane_;
-    homogeneous_transform P;
-    P(0, 0) = f / aspect;
-    P(1, 1) = f;
-    P(2, 2) = -(f_plane + n) / (f_plane - n);
-    P(2, 3) = -(2.0f * f_plane * n) / (f_plane - n);
-    P(3, 2) = -1.0f;
-    return P;
+    float a = f / aspect;
+    float b = f;
+    float c = -(f_plane + n) / (f_plane - n);
+    float d = -(2.0f * f_plane * n) / (f_plane - n);
+    return homogeneous_transform(
+        {{a, 0.0f, 0.0f, 0.0f},
+         {0.0f, b, 0.0f, 0.0f},
+         {0.0f, 0.0f, c, d},
+         {0.0f, 0.0f, -1.0f, 0.0f}});
 }
 }  // namespace chrray

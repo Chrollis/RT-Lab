@@ -1,5 +1,8 @@
 #pragma once
+#include <pmmintrin.h>
+#include <xmmintrin.h>
 #include <array>
+#include <initializer_list>
 
 namespace chrray {
 class homogeneous_coordinate;
@@ -9,13 +12,8 @@ public:
     euclidean_coordinate(std::initializer_list<float> values);
     euclidean_coordinate(float x, float y, float z);
 
-    float& operator[](size_t index);
-    const float& operator[](size_t index) const;
-    float& rx();
     float x() const;
-    float& ry();
     float y() const;
-    float& rz();
     float z() const;
 
     euclidean_coordinate operator+(const euclidean_coordinate& other) const;
@@ -34,24 +32,24 @@ public:
         float scalar, const euclidean_coordinate& vec);
     bool operator==(const euclidean_coordinate& other) const;
 
+    euclidean_coordinate with_x(float new_x) const;
+    euclidean_coordinate with_y(float new_y) const;
+    euclidean_coordinate with_z(float new_z) const;
+
 private:
-    std::array<float, 3> container_;
+    alignas(16) __m128 data_;
+    explicit euclidean_coordinate(__m128 data);
 };
+
 class homogeneous_coordinate {
 public:
     homogeneous_coordinate();
     homogeneous_coordinate(std::initializer_list<float> values);
     homogeneous_coordinate(float x, float y, float z, float w);
 
-    float& operator[](size_t index);
-    const float& operator[](size_t index) const;
-    float& rx();
     float x() const;
-    float& ry();
     float y() const;
-    float& rz();
     float z() const;
-    float& rw();
     float w() const;
 
     homogeneous_coordinate operator+(const homogeneous_coordinate& other) const;
@@ -69,8 +67,14 @@ public:
         float scalar, const homogeneous_coordinate& vec);
     bool operator==(const homogeneous_coordinate& other) const;
 
+    homogeneous_coordinate with_x(float new_x) const;
+    homogeneous_coordinate with_y(float new_y) const;
+    homogeneous_coordinate with_z(float new_z) const;
+    homogeneous_coordinate with_w(float new_w) const;
+
 private:
-    std::array<float, 4> container_;
+    alignas(16) __m128 data_;
+    explicit homogeneous_coordinate(__m128 data);
 };
 class quaternion {
 public:
@@ -78,15 +82,9 @@ public:
     quaternion(std::initializer_list<float> values);
     quaternion(float x, float y, float z, float w);
 
-    float& operator[](size_t index);
-    const float& operator[](size_t index) const;
-    float& rx();
     float x() const;
-    float& ry();
     float y() const;
-    float& rz();
     float z() const;
-    float& rw();
     float w() const;
 
     quaternion operator*(const quaternion& other) const;
@@ -96,8 +94,14 @@ public:
     euclidean_coordinate rotate_vector(const euclidean_coordinate& vec) const;
     bool operator==(const quaternion& other) const;
 
+    quaternion with_x(float new_x) const;
+    quaternion with_y(float new_y) const;
+    quaternion with_z(float new_z) const;
+    quaternion with_w(float new_w) const;
+
 private:
-    std::array<float, 4> container_;
+    alignas(16) __m128 data_;
+    explicit quaternion(__m128 data);
 
 public:
     static quaternion from_axis_angle(
@@ -109,17 +113,21 @@ public:
     homogeneous_transform(
         std::initializer_list<std::initializer_list<float>> values);
 
-    float& operator()(size_t row, size_t col);
-    const float& operator()(size_t row, size_t col) const;
-    float& operator[](size_t index);
-    const float& operator[](size_t index) const;
+    float operator()(size_t row, size_t col) const;
 
     homogeneous_transform operator*(const homogeneous_transform& other) const;
     homogeneous_coordinate operator*(const homogeneous_coordinate& vec) const;
     bool operator==(const homogeneous_transform& other) const;
 
+    homogeneous_transform with_translation(
+        const euclidean_coordinate& new_trans) const;
+    homogeneous_transform with_scale(
+        const euclidean_coordinate& new_scale) const;
+    homogeneous_transform then(const homogeneous_transform& after) const;
+
 private:
-    std::array<float, 16> container_;
+    alignas(16) std::array<__m128, 4> rows_;
+    explicit homogeneous_transform(const std::array<__m128, 4>& rows);
 
 public:
     static homogeneous_transform translation(const euclidean_coordinate& vec);
