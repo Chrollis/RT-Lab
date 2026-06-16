@@ -8,9 +8,12 @@ static thread_local uint32_t y = 362436069;
 static thread_local uint32_t z = 521288629;
 static thread_local uint32_t w = 88675123;
 
-void init_random() {
-    uint64_t t = std::chrono::steady_clock::now().time_since_epoch().count();
-    t ^= std::hash<std::thread::id>{}(std::this_thread::get_id());
+void init_random(unsigned seed) {
+    uint64_t t =
+        seed ? seed
+             : std::chrono::steady_clock::now().time_since_epoch().count();
+    t ^= seed ? (t + seed << 12 + seed >> 6)
+              : std::hash<std::thread::id>{}(std::this_thread::get_id());
     x = static_cast<uint32_t>(t);
     y = 362436069;
     z = 521288629;

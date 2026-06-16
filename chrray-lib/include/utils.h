@@ -9,7 +9,7 @@ constexpr float pi = 3.14159267f;
 constexpr float inf = std::numeric_limits<float>::infinity();
 constexpr float eps = 5e-4f;
 
-void init_random();
+void init_random(unsigned seed);
 float random_float();
 float random_float(float min, float max);
 

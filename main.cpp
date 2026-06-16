@@ -32,6 +32,9 @@ bool auto_trajectory = false;
 bool save_single_frame = false;
 bool use_rasterize = false;
 
+bool enable_shadows = true;
+unsigned int random_seed = 0;
+
 const float SURVIVAL = 0.8f;
 const color BACKGROUND_COLOR(0.1f, 0.15f, 0.25f, 1.0f);
 
@@ -86,7 +89,8 @@ color ray_color(const ray& r, int depth) {
         for (const auto& lit : sc.get_lights()) {
             euclidean_coordinate light_dir = lit->direction(rec.p);
             float light_dist = lit->distance(rec.p);
-            if (is_shadowed(rec.p, lit.get(), light_dist)) continue;
+            if (enable_shadows && is_shadowed(rec.p, lit.get(), light_dist))
+                continue;
 
             color light_intensity = lit->intensity(rec.p);
             float ndotl = std::max(0.0f, rec.n.dot(light_dir));
@@ -126,6 +130,35 @@ color ray_color(const ray& r, int depth) {
     return accumulated;
 }
 
+std::string format_duration(float seconds) {
+    int total_ms = static_cast<int>(seconds * 1000.0f);
+    int ms = total_ms % 1000;
+    int total_sec = total_ms / 1000;
+    int sec = total_sec % 60;
+    int total_min = total_sec / 60;
+    int min = total_min % 60;
+    int total_hour = total_min / 60;
+    int hour = total_hour % 24;
+    int day = total_hour / 24;
+
+    char buffer[128];
+    if (day > 0) {
+        snprintf(
+            buffer, sizeof(buffer), "%dd %dh %dm %ds %dms", day, hour, min, sec,
+            ms);
+    } else if (hour > 0) {
+        snprintf(
+            buffer, sizeof(buffer), "%dh %dm %ds %dms", hour, min, sec, ms);
+    } else if (min > 0) {
+        snprintf(buffer, sizeof(buffer), "%dm %ds %dms", min, sec, ms);
+    } else if (sec > 0) {
+        snprintf(buffer, sizeof(buffer), "%ds %dms", sec, ms);
+    } else {
+        snprintf(buffer, sizeof(buffer), "%dms", ms);
+    }
+    return std::string(buffer);
+}
+
 IMAGE render(bool draw) {
     std::vector<color> framebuffer(WIDTH * HEIGHT);
     float w_inv = 1.0f / WIDTH;
@@ -134,7 +167,7 @@ IMAGE render(bool draw) {
 
 #pragma omp parallel for schedule(dynamic, 16)
     for (int idx = 0; idx < WIDTH * HEIGHT; ++idx) {
-        init_random();
+        init_random(random_seed);
         int x = idx % WIDTH;
         int y = idx / WIDTH;
         float pr = 0, pg = 0, pb = 0, pa = 0;
@@ -546,7 +579,17 @@ void parse_command_line(int argc, char** argv) {
                 "  -u                     Set initial rendering algorithm to "
                 "Uniform Grid\n"
                 "  -t                     Auto trajectory mode (real-time) "
-                "or show frames in offline\n");
+                "or show frames in offline\n"
+                "  -seed <int>            Set random seed for scene "
+                "generation (0=auto)\n"
+                "  -shadow <0/1>          Enable/disable shadows (1=on, "
+                "0=off)\n"
+                "  -threads <n>           Set number of OpenMP threads "
+                "(default=all)\n"
+                "  -maxdepth <n>          Override maximum ray depth\n"
+                "  -mindepth <n>          Override minimum ray depth for "
+                "Russian roulette\n"
+                "  -raster                Start in rasterized preview mode");
             system("pause");
             closegraph();
             exit(0);
@@ -652,11 +695,48 @@ void parse_command_line(int argc, char** argv) {
             current_accel = accel_t::uniform_grid;
             sc.set_accel_type(current_accel);
             return;
+        } else if (strcmp(argv[i], "-seed") == 0) {
+            if (i + 1 >= argc) {
+                printf("Error: -seed requires an integer.\n");
+                exit(1);
+            }
+            random_seed = (unsigned int)atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-shadow") == 0) {
+            if (i + 1 >= argc) {
+                printf("Error: -shadow requires 0 or 1.\n");
+                exit(1);
+            }
+            enable_shadows = (atoi(argv[++i]) != 0);
+        } else if (strcmp(argv[i], "-threads") == 0) {
+            if (i + 1 >= argc) {
+                printf("Error: -threads requires an integer.\n");
+                exit(1);
+            }
+            int n = atoi(argv[++i]);
+            if (n < 1) n = 1;
+            omp_set_num_threads(n);
+        } else if (strcmp(argv[i], "-maxdepth") == 0) {
+            if (i + 1 >= argc) {
+                printf("Error: -maxdepth requires an integer.\n");
+                exit(1);
+            }
+            MAX_DEPTH = atoi(argv[++i]);
+            if (MAX_DEPTH < 1) MAX_DEPTH = 1;
+        } else if (strcmp(argv[i], "-mindepth") == 0) {
+            if (i + 1 >= argc) {
+                printf("Error: -mindepth requires an integer.\n");
+                exit(1);
+            }
+            MIN_DEPTH = atoi(argv[++i]);
+            if (MIN_DEPTH < 0) MIN_DEPTH = 0;
+        } else if (strcmp(argv[i], "-raster") == 0) {
+            use_rasterize = true;
         }
     }
 }
 
 int main(int argc, char** argv) {
+    omp_set_num_threads(omp_get_max_threads());
     parse_command_line(argc, argv);
 
     if (SAVE_DIRECTORY) {
@@ -669,10 +749,8 @@ int main(int argc, char** argv) {
         }
     }
 
-    omp_set_num_threads(omp_get_max_threads());
-
     try {
-        init_random();
+        init_random(random_seed);
         build_scene();
 
         if (!trajectory_mode) {
@@ -724,10 +802,11 @@ int main(int argc, char** argv) {
                     filename, sizeof(filename), "%s\\frame_%03d.bmp",
                     SAVE_DIRECTORY, frame);
                 saveimage(filename, &offscreen);
-                printf(
-                    "Saved %s (%.1f%%); SPF: %.02f; Remaining: %.02f\n",
-                    filename, 100.0f * frame / TOTAL_FRAMES, dt,
+                std::string time_str = format_duration(
                     (TOTAL_FRAMES - frame) * (dt + total_used / frame) * 0.5);
+                printf(
+                    "Saved %s (%.1f%%); SPF: %.02f; Remaining: %s\n", filename,
+                    100.0f * frame / TOTAL_FRAMES, dt, time_str.c_str());
                 current_angle += angle_step;
                 last_time = now;
             }
