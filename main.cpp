@@ -701,6 +701,7 @@ int main(int argc, char** argv) {
             const int TOTAL_FRAMES = save_single_frame ? 1 : offline_fps * 15;
             float angle_step = 2.0f * pi / TOTAL_FRAMES;
             float current_angle = 0.0f;
+            float total_used = 0.0f;
             sc.set_accel_type(accel_t::uniform_grid);
 
             printf(
@@ -717,15 +718,18 @@ int main(int argc, char** argv) {
                 auto now = std::chrono::steady_clock::now();
                 float dt =
                     std::chrono::duration<float>(now - last_time).count();
+                total_used += dt;
                 char filename[256];
                 snprintf(
                     filename, sizeof(filename), "%s\\frame_%03d.bmp",
                     SAVE_DIRECTORY, frame);
                 saveimage(filename, &offscreen);
                 printf(
-                    "Saved %s (%.1f%%); SPF: %.02f\n", filename,
-                    100.0f * frame / TOTAL_FRAMES, dt);
+                    "Saved %s (%.1f%%); SPF: %.02f; Remaining: %.02f\n",
+                    filename, 100.0f * frame / TOTAL_FRAMES, dt,
+                    (TOTAL_FRAMES - frame) * (dt + total_used / frame) * 0.5);
                 current_angle += angle_step;
+                last_time = now;
             }
             system("pause");
             closegraph();
