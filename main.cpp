@@ -9,7 +9,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
-#include <fstream>
 #include <memory>
 #include <random>
 #include <vector>
@@ -39,6 +38,11 @@ const float SURVIVAL = 0.8f;
 const color BACKGROUND_COLOR(0.1f, 0.15f, 0.25f, 1.0f);
 
 char* SAVE_DIRECTORY = nullptr;
+enum ObjectType { SPHERE, TRIANGLE, MIXED, MESH };
+ObjectType obj_type = SPHERE;
+float sphere_ratio = 0.5f;
+std::string mesh_filename;
+bool ignore_count = false;
 
 accel_t current_accel = accel_t::bvh;
 scene sc(current_accel);
@@ -128,6 +132,16 @@ color ray_color(const ray& r, int depth) {
     }
 
     return accumulated;
+}
+
+void print(const char* str, int code = 1) {
+    initgraph(WIDTH, HEIGHT, EX_SHOWCONSOLE);
+    HWND hWnd = GetHWnd();
+    ShowWindow(hWnd, SW_HIDE);
+    printf(str);
+    system("pause");
+    closegraph();
+    exit(code);
 }
 
 std::string format_duration(float seconds) {
@@ -367,48 +381,133 @@ void build_scene() {
         std::make_shared<metal>(color(1.0f, 1.0f, 1.0f, 1.0f), 0.05f);
     auto glass_mat = std::make_shared<dielectric>(
         1.46f, color(0.9f, 1.0f, 0.9f, 1.0f), 0.01f);
-
     std::vector<std::shared_ptr<material>> materials = {
         white_mat, silver_mat, glass_mat};
 
-    const int MAX_ATTEMPTS = 500;
-    std::vector<euclidean_coordinate> centers;
-    std::vector<float> radii;
+    auto choose_material = [&]() -> std::shared_ptr<material> {
+        float r = random_float();
+        if (r < 0.3f)
+            return materials[0];
+        else if (r < 0.6f)
+            return materials[1];
+        else
+            return materials[2];
+    };
 
     actual_objects = 0;
-    for (int i = 0; i < NUM_OBJECTS; ++i) {
-        for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt) {
-            float r = random_float() * scene_radius;
-            float theta = random_float() * 2 * pi;
-            float phi = random_float() * pi * 0.5;
-            float x = r * cosf(phi) * cosf(theta);
-            float z = r * cosf(phi) * sinf(theta);
-            float y = r * sinf(phi) + y_min;
-            float radius = random_float(0.5f, y_min);
-            euclidean_coordinate center(x, y, z);
 
-            bool overlap = false;
-            for (size_t j = 0; j < centers.size(); ++j) {
-                float dist = (center - centers[j]).length();
-                float min_dist = radius + radii[j];
-                if (dist < min_dist) {
-                    overlap = true;
+    if (obj_type == MESH) {
+        auto mesh_obj = std::make_shared<mesh>(mesh_filename, white_mat);
+
+        aabb bbox = mesh_obj->bounding_box();
+        auto tris = mesh_obj->triangulate();
+        euclidean_coordinate center = (bbox.min + bbox.max) * 0.5f;
+        float max_dim = std::max(
+            {bbox.max.x() - bbox.min.x(), bbox.max.y() - bbox.min.y(),
+             bbox.max.z() - bbox.min.z()});
+        float scale = (scene_radius * 0.6f) / max_dim;
+        float offset_y = -bbox.min.y() * scale;
+
+        for (auto& tri : tris) {
+            euclidean_coordinate v0 = (tri.v0 - center) * scale +
+                                      euclidean_coordinate(0, offset_y, 0);
+            euclidean_coordinate v1 = (tri.v1 - center) * scale +
+                                      euclidean_coordinate(0, offset_y, 0);
+            euclidean_coordinate v2 = (tri.v2 - center) * scale +
+                                      euclidean_coordinate(0, offset_y, 0);
+            sc.add_object(std::make_shared<triangle>(v0, v1, v2, white_mat));
+        }
+        actual_objects = (int)tris.size();
+    } else {
+        int sphere_count = 0, triangle_count = 0;
+        if (obj_type == SPHERE) {
+            sphere_count = NUM_OBJECTS;
+            triangle_count = 0;
+        } else if (obj_type == TRIANGLE) {
+            sphere_count = 0;
+            triangle_count = NUM_OBJECTS;
+        } else if (obj_type == MIXED) {
+            sphere_count = (int)(NUM_OBJECTS * sphere_ratio);
+            triangle_count = NUM_OBJECTS - sphere_count;
+        }
+
+        const int MAX_ATTEMPTS = 500;
+        std::vector<euclidean_coordinate> centers;
+        std::vector<float> radii;
+
+        for (int i = 0; i < sphere_count; ++i) {
+            bool placed = false;
+            for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt) {
+                float r = random_float() * scene_radius;
+                float theta = random_float() * 2 * pi;
+                float phi = random_float() * pi * 0.5;
+                float x = r * cosf(phi) * cosf(theta);
+                float z = r * cosf(phi) * sinf(theta);
+                float y = r * sinf(phi) + y_min;
+                float radius = random_float(0.5f, y_min);
+                euclidean_coordinate center(x, y, z);
+
+                bool overlap = false;
+                for (size_t j = 0; j < centers.size(); ++j) {
+                    float dist = (center - centers[j]).length();
+                    float min_dist = radius + radii[j];
+                    if (dist < min_dist) {
+                        overlap = true;
+                        break;
+                    }
+                }
+                if (!overlap) {
+                    centers.push_back(center);
+                    radii.push_back(radius);
+                    sc.add_object(
+                        std::make_shared<sphere>(
+                            center, radius, choose_material()));
+                    actual_objects++;
+                    placed = true;
                     break;
                 }
             }
-            if (!overlap) {
-                centers.push_back(center);
-                radii.push_back(radius);
-                int mat_idx = 0;
-                if (random_float() < 0.3f)
-                    mat_idx = 1;
-                else if (random_float() > 0.8f)
-                    mat_idx = 2;
+            if (!placed) {
+                float r = random_float() * scene_radius;
+                float theta = random_float() * 2 * pi;
+                float phi = random_float() * pi * 0.5;
+                float x = r * cosf(phi) * cosf(theta);
+                float z = r * cosf(phi) * sinf(theta);
+                float y = r * sinf(phi) + y_min;
+                float radius = random_float(0.5f, y_min);
                 sc.add_object(
                     std::make_shared<sphere>(
-                        center, radius, materials[mat_idx]));
+                        euclidean_coordinate(x, y, z), radius,
+                        choose_material()));
                 actual_objects++;
-                break;
+            }
+        }
+
+        for (int i = 0; i < triangle_count; ++i) {
+            euclidean_coordinate v0, v1, v2;
+            bool valid = false;
+            int attempts = 0;
+            while (!valid && attempts < 100) {
+                v0 = euclidean_coordinate(
+                    random_float(-scene_radius, scene_radius),
+                    random_float(y_min, y_max),
+                    random_float(-scene_radius, scene_radius));
+                v1 = v0 + euclidean_coordinate(
+                              random_float(-1, 1), random_float(-1, 1),
+                              random_float(-1, 1)) *
+                              0.5f;
+                v2 = v0 + euclidean_coordinate(
+                              random_float(-1, 1), random_float(-1, 1),
+                              random_float(-1, 1)) *
+                              0.5f;
+                euclidean_coordinate e1 = v1 - v0, e2 = v2 - v0;
+                if (e1.cross(e2).length() > 1e-4f) valid = true;
+                attempts++;
+            }
+            if (valid) {
+                sc.add_object(
+                    std::make_shared<triangle>(v0, v1, v2, choose_material()));
+                actual_objects++;
             }
         }
     }
@@ -422,7 +521,6 @@ void build_scene() {
     auto dl = std::make_shared<directional_light>(
         euclidean_coordinate(0.5f, -1.0f, -0.5f).normalize(),
         color(0.8f, 0.9f, 1.0f, 1.0f) * 1.2f);
-
     auto pl1 = std::make_shared<point_light>(
         euclidean_coordinate(
             scene_radius * 0.5f, y_max * 1.2f, scene_radius * 0.5f),
@@ -431,7 +529,6 @@ void build_scene() {
         euclidean_coordinate(
             -scene_radius * 0.5f, y_max * 1.2f, -scene_radius * 0.5f),
         color(1.0f, 0.85f, 0.7f, 1.0f), 1.0f, 0.01f, 0.01f);
-
     sc.add_light(dl);
     sc.add_light(pl1);
     sc.add_light(pl2);
@@ -539,10 +636,7 @@ void handle_input(ExMessage& msg) {
 void parse_command_line(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-h") == 0) {
-            initgraph(WIDTH, HEIGHT, EX_SHOWCONSOLE);
-            HWND hWnd = GetHWnd();
-            ShowWindow(hWnd, SW_HIDE);
-            printf(
+            print(
                 "Usage: raytracer [options]\n"
                 "Options:\n"
                 "  -h                     Show this help message\n"
@@ -589,14 +683,17 @@ void parse_command_line(int argc, char** argv) {
                 "  -maxdepth <n>          Override maximum ray depth\n"
                 "  -mindepth <n>          Override minimum ray depth for "
                 "Russian roulette\n"
-                "  -raster                Start in rasterized preview mode");
-            system("pause");
-            closegraph();
-            exit(0);
+                "  -raster                Start in rasterized preview mode\n"
+                "  -ob                    Use spheres as objects\n"
+                "  -ot                    Use triangles as objects\n"
+                "  -obt <ratio>           Use mixture of spheres and triangles "
+                "with sphere ratio (0~1)\n"
+                "  -om <path>             Load mesh from OBJ file (disables "
+                "-c)\n",
+                0);
         } else if (strcmp(argv[i], "-q") == 0) {
             if (i + 2 >= argc) {
-                printf("Error: -q requires width and height.\n");
-                exit(1);
+                print("Error: -q requires width and height.\n");
             }
             WIDTH = atoi(argv[++i]);
             HEIGHT = atoi(argv[++i]);
@@ -606,26 +703,26 @@ void parse_command_line(int argc, char** argv) {
                 offline_fps = 24;
             }
         } else if (strcmp(argv[i], "-c") == 0) {
+            if (ignore_count) {
+                i++;
+                continue;
+            }
             if (i + 1 >= argc) {
-                printf("Error: -c requires a count.\n");
-                exit(1);
+                print("Error: -c requires a count.\n");
             }
             NUM_OBJECTS = atoi(argv[++i]);
         } else if (strcmp(argv[i], "-r") == 0) {
             if (i + 2 >= argc) {
-                printf("Error: -r requires min_depth and max_depth.\n");
-                exit(1);
+                print("Error: -r requires min_depth and max_depth.\n");
             }
             MIN_DEPTH = atoi(argv[++i]);
             MAX_DEPTH = atoi(argv[++i]);
             if (MIN_DEPTH > MAX_DEPTH) {
-                printf("Error: MIN_DEPTH must be <= MAX_DEPTH\n");
-                exit(1);
+                print("Error: MIN_DEPTH must be <= MAX_DEPTH\n");
             }
         } else if (strcmp(argv[i], "-a") == 0) {
             if (i + 1 >= argc) {
-                printf("Error: -a requires a samples count.\n");
-                exit(1);
+                print("Error: -a requires a samples count.\n");
             }
             SAMPLES_PER_PIXEL = atoi(argv[++i]);
         } else if (strcmp(argv[i], "-ql") == 0) {
@@ -663,8 +760,7 @@ void parse_command_line(int argc, char** argv) {
             SAMPLES_PER_PIXEL = 8;
         } else if (strcmp(argv[i], "-s") == 0) {
             if (i + 1 >= argc) {
-                printf("Error: -s requires a directory path.\n");
-                exit(1);
+                print("Error: -s requires a directory path.\n");
             }
             SAVE_DIRECTORY = argv[++i];
         } else if (strcmp(argv[i], "-sd") == 0) {
@@ -697,40 +793,56 @@ void parse_command_line(int argc, char** argv) {
             return;
         } else if (strcmp(argv[i], "-seed") == 0) {
             if (i + 1 >= argc) {
-                printf("Error: -seed requires an integer.\n");
-                exit(1);
+                print("Error: -seed requires an integer.\n");
             }
             random_seed = (unsigned int)atoi(argv[++i]);
         } else if (strcmp(argv[i], "-shadow") == 0) {
             if (i + 1 >= argc) {
-                printf("Error: -shadow requires 0 or 1.\n");
-                exit(1);
+                print("Error: -shadow requires 0 or 1.\n");
             }
             enable_shadows = (atoi(argv[++i]) != 0);
         } else if (strcmp(argv[i], "-threads") == 0) {
             if (i + 1 >= argc) {
-                printf("Error: -threads requires an integer.\n");
-                exit(1);
+                print("Error: -threads requires an integer.\n");
             }
             int n = atoi(argv[++i]);
             if (n < 1) n = 1;
             omp_set_num_threads(n);
         } else if (strcmp(argv[i], "-maxdepth") == 0) {
             if (i + 1 >= argc) {
-                printf("Error: -maxdepth requires an integer.\n");
-                exit(1);
+                print("Error: -maxdepth requires an integer.\n");
             }
             MAX_DEPTH = atoi(argv[++i]);
             if (MAX_DEPTH < 1) MAX_DEPTH = 1;
         } else if (strcmp(argv[i], "-mindepth") == 0) {
             if (i + 1 >= argc) {
-                printf("Error: -mindepth requires an integer.\n");
-                exit(1);
+                print("Error: -mindepth requires an integer.\n");
             }
             MIN_DEPTH = atoi(argv[++i]);
             if (MIN_DEPTH < 0) MIN_DEPTH = 0;
         } else if (strcmp(argv[i], "-raster") == 0) {
             use_rasterize = true;
+        } else if (strcmp(argv[i], "-ob") == 0) {
+            obj_type = SPHERE;
+            ignore_count = false;
+        } else if (strcmp(argv[i], "-ot") == 0) {
+            obj_type = TRIANGLE;
+            ignore_count = false;
+        } else if (strcmp(argv[i], "-obt") == 0) {
+            if (i + 1 >= argc) {
+                print("Error: -obt requires a float ratio (0~1).\n");
+            }
+            sphere_ratio = (float)atof(argv[++i]);
+            if (sphere_ratio < 0.0f || sphere_ratio > 1.0f) sphere_ratio = 0.5f;
+            obj_type = MIXED;
+            ignore_count = false;
+        } else if (strcmp(argv[i], "-om") == 0) {
+            if (i + 1 >= argc) {
+                print("Error: -om requires a file path.\n");
+            }
+            mesh_filename = argv[++i];
+            obj_type = MESH;
+            ignore_count = true;
         }
     }
 }
@@ -881,8 +993,7 @@ int main(int argc, char** argv) {
         }
         closegraph();
     } catch (std::exception& e) {
-        std::ofstream ofs("./log.txt");
-        ofs << e.what() << std::endl;
+        print(e.what());
     }
     return 0;
 }
