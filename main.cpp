@@ -512,12 +512,14 @@ void build_scene() {
         }
     }
 
-    auto ground = std::make_shared<metal>(color(0.4f, 0.4f, 0.45f, 1.0f), 0.0f);
-    sc.add_plane(
-        std::make_shared<plane>(
-            euclidean_coordinate(0, 0, 0), euclidean_coordinate(0, 1, 0),
-            ground));
-
+    if(obj_type != MESH){
+        auto ground = std::make_shared<metal>(color(0.4f, 0.4f, 0.45f, 1.0f), 0.0f);
+        sc.add_plane(
+            std::make_shared<plane>(
+                euclidean_coordinate(0, 0, 0), euclidean_coordinate(0, 1, 0),
+                ground));
+    }
+    
     auto dl = std::make_shared<directional_light>(
         euclidean_coordinate(0.5f, -1.0f, -0.5f).normalize(),
         color(0.8f, 0.9f, 1.0f, 1.0f) * 1.2f);
