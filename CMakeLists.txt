@@ -10,18 +10,25 @@ set(EASYX_LIB ${EASYX_DIR}/lib/VC2015/x64/EasyXa.lib)
 
 find_package(OpenMP REQUIRED)
 
-# Add chrray-lib subdirectory
+include(FetchContent)
+FetchContent_Declare(
+    cxxopts
+    GIT_REPOSITORY https://github.com/jarro2783/cxxopts.git
+    GIT_TAG v3.3.1                       
+)
+
+FetchContent_MakeAvailable(cxxopts)
+
+add_compile_options(/utf-8 /fp:fast /arch:AVX2)
 add_subdirectory(chrray-lib)
 
 file(GLOB SOURCE_FILES "*.cpp")
 
-add_compile_options(/utf-8 /fp:fast /arch:AVX2)
 add_executable(RT-Lab ${SOURCE_FILES})
 
-target_link_options(RT-Lab PRIVATE 
-            /SUBSYSTEM:WINDOWS 
-            /ENTRY:mainCRTStartup
-        )
-
 target_include_directories(RT-Lab PRIVATE ${EASYX_INCLUDE})
-target_link_libraries(RT-Lab PRIVATE ${EASYX_LIB} chrray-lib OpenMP::OpenMP_CXX)
+target_link_libraries(RT-Lab PRIVATE 
+    ${EASYX_LIB} 
+    chrray-lib 
+    OpenMP::OpenMP_CXX
+)

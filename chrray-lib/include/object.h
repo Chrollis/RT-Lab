@@ -143,7 +143,11 @@ private:
 
 class mesh : public hittable {
 public:
-    mesh(const std::filesystem::path& filepath, std::shared_ptr<material> mat);
+    mesh(
+        const std::filesystem::path& filepath,
+        float scene_radius,
+        float scene_y_min,
+        std::shared_ptr<material> mat);
     virtual bool intersect(
         const ray& r, float t_min, float t_max, hit_record& rec) const override;
     virtual aabb bounding_box() const override;

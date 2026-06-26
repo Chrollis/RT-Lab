@@ -764,7 +764,11 @@ __m256i plane::any_hit8(const ray8& rays) const {
     return _mm256_castps_si256(valid);
 }
 
-mesh::mesh(const std::filesystem::path& filepath, std::shared_ptr<material> mat)
+mesh::mesh(
+    const std::filesystem::path& filepath,
+    float scene_radius,
+    float scene_y_min,
+    std::shared_ptr<material> mat)
     : mat_(mat) {
     std::ifstream file(filepath);
     if (!file.is_open())
@@ -773,6 +777,7 @@ mesh::mesh(const std::filesystem::path& filepath, std::shared_ptr<material> mat)
 
     std::vector<euclidean_coordinate> vertices;
     std::string line;
+    std::vector<triangle> temps;
     while (std::getline(file, line)) {
         if (line.empty() || line[0] == '#') continue;
         std::istringstream iss(line);
@@ -796,12 +801,35 @@ mesh::mesh(const std::filesystem::path& filepath, std::shared_ptr<material> mat)
                 int i2 = idxs[i] - 1;
                 if (i0 >= 0 && i1 >= 0 && i2 >= 0 && i0 < vertices.size() &&
                     i1 < vertices.size() && i2 < vertices.size()) {
-                    triangles_.push_back(
-                        std::make_unique<triangle>(
-                            vertices[i0], vertices[i1], vertices[i2], mat_));
+                    temps.emplace_back(
+                        vertices[i0], vertices[i1], vertices[i2], mat_);
                 }
             }
         }
+    }
+    aabb temp_bbox;
+    if (!temps.empty()) {
+        temp_bbox = temps[0].bounding_box();
+        for (size_t i = 1; i < temps.size(); ++i) {
+            temp_bbox = surrounding_box(temp_bbox, temps[i].bounding_box());
+        }
+    }
+    euclidean_coordinate center = (temp_bbox.min + temp_bbox.max) * 0.5f;
+    float max_dim = std::max(
+        {temp_bbox.max.x() - temp_bbox.min.x(),
+         temp_bbox.max.y() - temp_bbox.min.y(),
+         temp_bbox.max.z() - temp_bbox.min.z()});
+    float scale = (scene_radius * 0.6f) / max_dim;
+    float offset_y = (scene_y_min - temp_bbox.min.y()) * scale;
+    for (auto& t : temps) {
+        auto& tri = t.triangulate()[0];
+        euclidean_coordinate v0 =
+            (tri.v0 - center) * scale + euclidean_coordinate(0, offset_y, 0);
+        euclidean_coordinate v1 =
+            (tri.v1 - center) * scale + euclidean_coordinate(0, offset_y, 0);
+        euclidean_coordinate v2 =
+            (tri.v2 - center) * scale + euclidean_coordinate(0, offset_y, 0);
+        triangles_.push_back(std::make_unique<triangle>(v0, v1, v2, mat_));
     }
     if (!triangles_.empty()) {
         bbox_ = triangles_[0]->bounding_box();

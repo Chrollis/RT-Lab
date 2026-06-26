@@ -16,7 +16,7 @@ enum class accel_t {
 
 class scene {
 public:
-    scene(accel_t accel_type = accel_t::linear);
+    scene(accel_t accel_type = accel_t::bvh);
     ~scene();
 
     void add_object(std::shared_ptr<hittable> obj);
