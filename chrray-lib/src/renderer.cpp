@@ -5,11 +5,21 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <ctime>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 
 namespace chrray {
+static std::string current_time_str() {
+    auto now = std::chrono::system_clock::now();
+    std::time_t t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm = *std::localtime(&t);
+    std::ostringstream oss;
+    oss << "[" << std::put_time(&tm, "%y-%m-%d %H:%M:%S") << "]";
+    return oss.str();
+}
+
 static std::string format_duration(float seconds) {
     int total_ms = static_cast<int>(seconds * 1000.0f);
     int ms = total_ms % 1000;
@@ -489,16 +499,29 @@ IMAGE renderer::render_rasterized(bool draw) {
 }
 
 static void update_progress(
-    int frame, int total_frames, float dt, const std::string& filename) {
+    int frame,
+    int total_frames,
+    float dt,
+    float total_time,
+    const std::string& filename) {
     float progress = static_cast<float>(frame) / total_frames;
-    int percent = static_cast<int>(progress * 100.0f);
+    int percent = static_cast<int>(progress * 100 + 0.5f);
 
-    const int bar_width = 50;
-    int filled = static_cast<int>(progress * bar_width);
-    std::string bar = "[" + std::string(filled, '#') +
-                      std::string(bar_width - filled, '-') + "]";
+    const int bar_width = 10;
+    int ten = percent / 10;
+    int one = percent % 10;
 
-    float remaining_sec = dt * (total_frames - frame);
+    std::string core;
+    core.append(ten, '#');
+    if (one > 0) {
+        core.push_back('0' + one);
+    }
+
+    int remaining = bar_width - core.size();
+    std::string bar = "[" + core + std::string(remaining, '=') + "]";
+
+    float avg_spf = (total_time / frame + dt) * 0.5f;
+    float remaining_sec = avg_spf * (total_frames - frame);
     int remain_h = static_cast<int>(remaining_sec) / 3600;
     int remain_m = (static_cast<int>(remaining_sec) % 3600) / 60;
     int remain_s = static_cast<int>(remaining_sec) % 60;
@@ -508,11 +531,10 @@ static void update_progress(
     remain_oss << remain_s << "s";
 
     std::ostringstream output;
-    output << "\r" << bar << " " << percent << "% "
-           << "Saved " << filename << " "
-           << "(" << frame << "/" << total_frames << ") "
-           << "SPF: " << std::fixed << std::setprecision(2) << dt << "s "
-           << "Remaining: " << remain_oss.str();
+    output << "\r" << current_time_str() << " " << bar << " (" << frame << "/"
+           << total_frames << ") "
+           << "SPF: " << std::fixed << std::setprecision(2) << dt << "s, "
+           << "ETA: " << remain_oss.str() << " ";
 
     std::cout << output.str() << std::flush;
 }
@@ -554,11 +576,26 @@ void renderer::run_offline_rendering() {
         saveimage(oss.str().c_str(), &img);
         std::string time_str = format_duration(
             (total_frames - frame) * (dt + total_used / frame) * 0.5);
-        update_progress(frame, total_frames, dt, oss.str());
+        update_progress(frame, total_frames, dt, total_used, oss.str());
         current_angle += angle_step;
         last_time = now;
         Sleep(1);
     }
+}
+
+static void update_online_status(
+    float spf, int objects, const char* accel, int w, int h, bool rasterize) {
+    std::ostringstream output;
+    output << "\r" << current_time_str() << " ";
+    if (rasterize) {
+        output << "[Z-buffer] ";
+    } else {
+        output << "[Raytrace] ";
+    }
+    output << "OBJ: " << objects << ", "
+           << "SPF: " << std::fixed << std::setprecision(2) << spf << "s, "
+           << "Accel: " << accel << ", " << "Size: " << w << "x" << h << " ";
+    std::cout << output.str() << std::flush;
 }
 
 void renderer::run_online_rendering() {
@@ -614,13 +651,10 @@ void renderer::run_online_rendering() {
             accel_name = "BVH";
         else if (accel_type_ == accel_t::uniform_grid)
             accel_name = "Uniform Grid";
-        if (use_rasterize_) accel_name = "Z-buffer";
-        std::ostringstream oss;
-        oss << "RayTracer | OBJ: " << actual_objects_
-            << " | SPF: " << std::fixed << std::setprecision(2) << elapsed
-            << " | Accel: " << accel_name << " | " << width_ << "x" << height_;
-        std::string title = oss.str();
-        SetWindowText(GetHWnd(), oss.str().c_str());
+        if (use_rasterize_) accel_name = "None";
+        update_online_status(
+            elapsed, actual_objects_, accel_name, width_, height_,
+            use_rasterize_);
         last_time = now;
         Sleep(1);
     }
@@ -736,6 +770,8 @@ void renderer::run() {
     initgraph(width_, height_, EX_SHOWCONSOLE);
     setbkcolor(RGB(0, 0, 0));
 
+    std::cout << "\nRT-Lab started.\n";
+
     if (!save_directory_.empty()) {
         DWORD attrib = GetFileAttributes(save_directory_.c_str());
         if (attrib == INVALID_FILE_ATTRIBUTES ||
@@ -753,6 +789,8 @@ void renderer::run() {
     }
 
     closegraph();
+
+    std::cout << "\nRT-Lab exited.\n";
 }
 
 void renderer::parse_args(int argc, char** argv) {
@@ -821,6 +859,13 @@ void renderer::parse_args(int argc, char** argv) {
         if (result.count("save-single")) {
             save_single_frame_ = true;
             save_directory_ = ".";
+        }
+        if (!save_directory_.empty()) {
+            std::filesystem::path p(save_directory_);
+            if (p.is_relative()) {
+                p = std::filesystem::absolute(p);
+            }
+            save_directory_ = p.string();
         }
         if (result.count("accel")) {
             std::string acc = result["accel"].as<std::string>();
