@@ -92,7 +92,10 @@ renderer::renderer()
             "R,rasterize", "Rasterized preview mode")(
             "O,obj-type", "Object type (sphere|triangle|mixed:0.5)",
             cxxopts::value<std::string>())(
-            "M,mesh", "Load mesh file (FILE)", cxxopts::value<std::string>());
+            "M,mesh", "Load mesh file (FILE)", cxxopts::value<std::string>())(
+            "p,priority",
+            "Set the priorities of the rendering threads (normal|low|idle)",
+            cxxopts::value<std::string>());
 }
 
 void renderer::error_and_exit(const std::string& msg) const {
@@ -323,32 +326,50 @@ color renderer::ray_color(const ray& r, int depth) const {
     return accumulated;
 }
 
+void apply_priority(int pl) {
+    DWORD cls = NORMAL_PRIORITY_CLASS;
+    switch (pl) {
+        case 1:
+            cls = BELOW_NORMAL_PRIORITY_CLASS;
+            break;
+        case 2:
+            cls = IDLE_PRIORITY_CLASS;
+            break;
+        default:
+            break;
+    }
+    SetPriorityClass(GetCurrentProcess(), cls);
+}
+
 IMAGE renderer::render(bool draw) {
     std::vector<color> framebuffer(width_ * height_);
     float w_inv = 1.0f / width_;
     float h_inv = 1.0f / height_;
     float s_inv = 1.0f / samples_per_pixel_;
 
-#pragma omp parallel for schedule(dynamic, 16)
-    for (int idx = 0; idx < width_ * height_; ++idx) {
-        init_random(0);
-        int x = idx % width_;
-        int y = idx / width_;
-        float pr = 0, pg = 0, pb = 0, pa = 0;
-        for (int s = 0; s < samples_per_pixel_; ++s) {
-            float u = (x + random_float()) * w_inv;
-            float v = (y + random_float()) * h_inv;
-            ray r = cam_.get_ray(u, v);
-            color rc = ray_color(r, 0);
-            pr += rc.r;
-            pg += rc.g;
-            pb += rc.b;
-            pa += rc.a;
+#pragma omp parallel
+    {
+        apply_priority(priority_);
+#pragma omp for schedule(dynamic, 16)
+        for (int idx = 0; idx < width_ * height_; ++idx) {
+            init_random(0);
+            int x = idx % width_;
+            int y = idx / width_;
+            float pr = 0, pg = 0, pb = 0, pa = 0;
+            for (int s = 0; s < samples_per_pixel_; ++s) {
+                float u = (x + random_float()) * w_inv;
+                float v = (y + random_float()) * h_inv;
+                ray r = cam_.get_ray(u, v);
+                color rc = ray_color(r, 0);
+                pr += rc.r;
+                pg += rc.g;
+                pb += rc.b;
+                pa += rc.a;
+            }
+            color pixel_color(pr * s_inv, pg * s_inv, pb * s_inv, pa * s_inv);
+            framebuffer[idx] = pixel_color.gamma_correct(2.2f);
         }
-        color pixel_color(pr * s_inv, pg * s_inv, pb * s_inv, pa * s_inv);
-        framebuffer[idx] = pixel_color.gamma_correct(2.2f);
     }
-
     IMAGE img(width_, height_);
     DWORD* bits = GetImageBuffer(&img);
     for (int y = 0; y < height_; ++y) {
@@ -383,95 +404,100 @@ IMAGE renderer::render_rasterized(bool draw) {
         local_framebuffers[t].assign(pixel_count, color::black());
     }
 
-#pragma omp parallel for schedule(dynamic, 16)
-    for (int idx = 0; idx < (int)triangles.size(); ++idx) {
-        int tid = omp_get_thread_num();
-        auto& zbuffer = local_zbuffers[tid];
-        auto& framebuffer = local_framebuffers[tid];
+#pragma omp parallel
+    {
+        apply_priority(priority_);
+#pragma omp for schedule(dynamic, 16)
+        for (int idx = 0; idx < (int)triangles.size(); ++idx) {
+            int tid = omp_get_thread_num();
+            auto& zbuffer = local_zbuffers[tid];
+            auto& framebuffer = local_framebuffers[tid];
 
-        const auto& tri = triangles[idx];
-        euclidean_coordinate v0_w = tri.v0, v1_w = tri.v1, v2_w = tri.v2;
-        euclidean_coordinate center = (v0_w + v1_w + v2_w) / 3.0f;
-        euclidean_coordinate view_dir = (cam_.origin() - center).normalize();
-        if (tri.normal.dot(view_dir) >= 0) continue;
+            const auto& tri = triangles[idx];
+            euclidean_coordinate v0_w = tri.v0, v1_w = tri.v1, v2_w = tri.v2;
+            euclidean_coordinate center = (v0_w + v1_w + v2_w) / 3.0f;
+            euclidean_coordinate view_dir =
+                (cam_.origin() - center).normalize();
+            if (tri.normal.dot(view_dir) >= 0) continue;
 
-        homogeneous_coordinate h0 = v0_w.homogenize();
-        homogeneous_coordinate h1 = v1_w.homogenize();
-        homogeneous_coordinate h2 = v2_w.homogenize();
-        h0 = VP * h0;
-        h1 = VP * h1;
-        h2 = VP * h2;
+            homogeneous_coordinate h0 = v0_w.homogenize();
+            homogeneous_coordinate h1 = v1_w.homogenize();
+            homogeneous_coordinate h2 = v2_w.homogenize();
+            h0 = VP * h0;
+            h1 = VP * h1;
+            h2 = VP * h2;
 
-        float w0 = h0.w(), w1 = h1.w(), w2 = h2.w();
-        if (w0 <= 0 && w1 <= 0 && w2 <= 0) continue;
+            float w0 = h0.w(), w1 = h1.w(), w2 = h2.w();
+            if (w0 <= 0 && w1 <= 0 && w2 <= 0) continue;
 
-        euclidean_coordinate ndc0 = h0.dehomogenize();
-        euclidean_coordinate ndc1 = h1.dehomogenize();
-        euclidean_coordinate ndc2 = h2.dehomogenize();
+            euclidean_coordinate ndc0 = h0.dehomogenize();
+            euclidean_coordinate ndc1 = h1.dehomogenize();
+            euclidean_coordinate ndc2 = h2.dehomogenize();
 
-        if (fabs(ndc0.x()) > 2.0f || fabs(ndc0.y()) > 2.0f ||
-            fabs(ndc0.z()) > 2.0f || fabs(ndc1.x()) > 2.0f ||
-            fabs(ndc1.y()) > 2.0f || fabs(ndc1.z()) > 2.0f ||
-            fabs(ndc2.x()) > 2.0f || fabs(ndc2.y()) > 2.0f ||
-            fabs(ndc2.z()) > 2.0f)
-            continue;
+            if (fabs(ndc0.x()) > 2.0f || fabs(ndc0.y()) > 2.0f ||
+                fabs(ndc0.z()) > 2.0f || fabs(ndc1.x()) > 2.0f ||
+                fabs(ndc1.y()) > 2.0f || fabs(ndc1.z()) > 2.0f ||
+                fabs(ndc2.x()) > 2.0f || fabs(ndc2.y()) > 2.0f ||
+                fabs(ndc2.z()) > 2.0f)
+                continue;
 
-        auto to_screen =
-            [&](const euclidean_coordinate& ndc) -> euclidean_coordinate {
-            return euclidean_coordinate(
-                (ndc.x() + 1.0f) * 0.5f * w, (1.0f - ndc.y()) * 0.5f * h,
-                ndc.z());
-        };
-        euclidean_coordinate s0 = to_screen(ndc0);
-        euclidean_coordinate s1 = to_screen(ndc1);
-        euclidean_coordinate s2 = to_screen(ndc2);
+            auto to_screen =
+                [&](const euclidean_coordinate& ndc) -> euclidean_coordinate {
+                return euclidean_coordinate(
+                    (ndc.x() + 1.0f) * 0.5f * w, (1.0f - ndc.y()) * 0.5f * h,
+                    ndc.z());
+            };
+            euclidean_coordinate s0 = to_screen(ndc0);
+            euclidean_coordinate s1 = to_screen(ndc1);
+            euclidean_coordinate s2 = to_screen(ndc2);
 
-        if (!std::isfinite(s0.x()) || !std::isfinite(s0.y()) ||
-            !std::isfinite(s1.x()) || !std::isfinite(s1.y()) ||
-            !std::isfinite(s2.x()) || !std::isfinite(s2.y()))
-            continue;
+            if (!std::isfinite(s0.x()) || !std::isfinite(s0.y()) ||
+                !std::isfinite(s1.x()) || !std::isfinite(s1.y()) ||
+                !std::isfinite(s2.x()) || !std::isfinite(s2.y()))
+                continue;
 
-        int xmin =
-            std::max(0, (int)std::floor(std::min({s0.x(), s1.x(), s2.x()})));
-        int xmax =
-            std::min(w - 1, (int)std::ceil(std::max({s0.x(), s1.x(), s2.x()})));
-        int ymin =
-            std::max(0, (int)std::floor(std::min({s0.y(), s1.y(), s2.y()})));
-        int ymax =
-            std::min(h - 1, (int)std::ceil(std::max({s0.y(), s1.y(), s2.y()})));
-        if (xmin > xmax || ymin > ymax) continue;
+            int xmin = std::max(
+                0, (int)std::floor(std::min({s0.x(), s1.x(), s2.x()})));
+            int xmax = std::min(
+                w - 1, (int)std::ceil(std::max({s0.x(), s1.x(), s2.x()})));
+            int ymin = std::max(
+                0, (int)std::floor(std::min({s0.y(), s1.y(), s2.y()})));
+            int ymax = std::min(
+                h - 1, (int)std::ceil(std::max({s0.y(), s1.y(), s2.y()})));
+            if (xmin > xmax || ymin > ymax) continue;
 
-        color base_color =
-            tri.mat->diffuse_color(hit_record(), euclidean_coordinate(0, 0, 0));
+            color base_color = tri.mat->diffuse_color(
+                hit_record(), euclidean_coordinate(0, 0, 0));
 
-        auto edge = [](const euclidean_coordinate& a,
-                       const euclidean_coordinate& b,
-                       const euclidean_coordinate& p) -> float {
-            return (b.x() - a.x()) * (p.y() - a.y()) -
-                   (b.y() - a.y()) * (p.x() - a.x());
-        };
-        float area = edge(s0, s1, s2);
-        if (area == 0.0f) continue;
-        float inv_area = 1.0f / area;
-        euclidean_coordinate n = tri.normal.normalize();
+            auto edge = [](const euclidean_coordinate& a,
+                           const euclidean_coordinate& b,
+                           const euclidean_coordinate& p) -> float {
+                return (b.x() - a.x()) * (p.y() - a.y()) -
+                       (b.y() - a.y()) * (p.x() - a.x());
+            };
+            float area = edge(s0, s1, s2);
+            if (area == 0.0f) continue;
+            float inv_area = 1.0f / area;
+            euclidean_coordinate n = tri.normal.normalize();
 
-        for (int y = ymin; y <= ymax; ++y) {
-            for (int x = xmin; x <= xmax; ++x) {
-                euclidean_coordinate p(x + 0.5f, y + 0.5f, 0);
-                float w0 = edge(s1, s2, p);
-                float w1 = edge(s2, s0, p);
-                float w2 = edge(s0, s1, p);
-                if (w0 < 0 || w1 < 0 || w2 < 0) continue;
-                w0 *= inv_area;
-                w1 *= inv_area;
-                w2 *= inv_area;
-                float depth = w0 * s0.z() + w1 * s1.z() + w2 * s2.z();
-                int pixel_idx = y * w + x;
-                if (depth < zbuffer[pixel_idx]) {
-                    zbuffer[pixel_idx] = depth;
-                    float ndotl = std::max(0.0f, n.dot(light_dir));
-                    color lit = base_color * ndotl + base_color * 0.1f;
-                    framebuffer[pixel_idx] = lit.gamma_correct(2.2f);
+            for (int y = ymin; y <= ymax; ++y) {
+                for (int x = xmin; x <= xmax; ++x) {
+                    euclidean_coordinate p(x + 0.5f, y + 0.5f, 0);
+                    float w0 = edge(s1, s2, p);
+                    float w1 = edge(s2, s0, p);
+                    float w2 = edge(s0, s1, p);
+                    if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+                    w0 *= inv_area;
+                    w1 *= inv_area;
+                    w2 *= inv_area;
+                    float depth = w0 * s0.z() + w1 * s1.z() + w2 * s2.z();
+                    int pixel_idx = y * w + x;
+                    if (depth < zbuffer[pixel_idx]) {
+                        zbuffer[pixel_idx] = depth;
+                        float ndotl = std::max(0.0f, n.dot(light_dir));
+                        color lit = base_color * ndotl + base_color * 0.1f;
+                        framebuffer[pixel_idx] = lit.gamma_correct(2.2f);
+                    }
                 }
             }
         }
@@ -646,12 +672,18 @@ void renderer::run_online_rendering() {
 
         auto now = std::chrono::steady_clock::now();
         float elapsed = std::chrono::duration<float>(now - last_time).count();
+        char title[128];
         const char* accel_name = "Linear";
         if (accel_type_ == accel_t::bvh)
             accel_name = "BVH";
         else if (accel_type_ == accel_t::uniform_grid)
             accel_name = "Uniform Grid";
         if (use_rasterize_) accel_name = "None";
+        snprintf(
+            title, sizeof(title),
+            "[RT-Lab] OBJ: %d, SPF: %.2fs, Accel: %s, Size: %dx%d",
+            actual_objects_, elapsed, accel_name, width_, height_);
+        SetWindowText(GetHWnd(), title);
         update_online_status(
             elapsed, actual_objects_, accel_name, width_, height_,
             use_rasterize_);
@@ -704,14 +736,17 @@ void renderer::handle_input(const ExMessage& msg) {
             cam_.rotate_yaw(-rot_speed);
             break;
         case 'B':
+            if (use_rasterize_) use_rasterize_ = false;
             accel_type_ = accel_t::bvh;
             sc_.set_accel_type(accel_type_);
             break;
         case 'N':
+            if (use_rasterize_) use_rasterize_ = false;
             accel_type_ = accel_t::linear;
             sc_.set_accel_type(accel_type_);
             break;
         case 'M':
+            if (use_rasterize_) use_rasterize_ = false;
             accel_type_ = accel_t::uniform_grid;
             sc_.set_accel_type(accel_type_);
             break;
@@ -739,6 +774,9 @@ void renderer::handle_input(const ExMessage& msg) {
             break;
         case 'Y':
             cam_.reset_up();
+            break;
+        case VK_CONTROL:
+            priority_ = (priority_ + 1) % 3;
             break;
         default:
             break;
@@ -770,7 +808,7 @@ void renderer::run() {
     initgraph(width_, height_, EX_SHOWCONSOLE);
     setbkcolor(RGB(0, 0, 0));
 
-    std::cout << "\nRT-Lab started.\n";
+    std::cout << "RT-Lab started.\n";
 
     if (!save_directory_.empty()) {
         DWORD attrib = GetFileAttributes(save_directory_.c_str());
@@ -918,6 +956,18 @@ void renderer::parse_args(int argc, char** argv) {
             mesh_filename_ = result["mesh"].as<std::string>();
             obj_type_ = object_t::mesh;
         }
+        if (result.count("priority")) {
+            std::string pl = result["priority"].as<std::string>();
+            if (pl == "normal")
+                priority_ = 0;
+            else if (pl == "low")
+                priority_ = 1;
+            else if (pl == "idle")
+                priority_ = 2;
+            else {
+                throw cxxopts::exceptions::parsing("Invalid priority: " + pl);
+            }
+        }
         if (!result.unmatched().empty()) {
             std::cerr << "Warning: Unrecognized arguments:";
             for (const auto& u : result.unmatched()) std::cerr << " " << u;
@@ -933,7 +983,21 @@ void renderer::parse_args(int argc, char** argv) {
 }
 
 void renderer::print_help_and_exit(int code) const {
-    std::cout << opt_.help() << std::endl;
+    std::cout << opt_.help();
+    std::cout << "Controls:\n"
+              << "  W/S/A/D       Move camera forward/backward/left/right\n"
+              << "  Space         Move camera up\n"
+              << "  Shift         Move camera down\n"
+              << "  Q/E           Roll left/right\n"
+              << "  I/K           Pitch up/down\n"
+              << "  J/L           Yaw left/right\n"
+              << "  B/N/M         Set accelerator (BVH/Linear/Uniform Grid)\n"
+              << "  R             Rebuild scene\n"
+              << "  T             Toggle auto-trajectory mode\n"
+              << "  Z             Toggle rasterized preview mode\n"
+              << "  Y             Reset camera up vector\n"
+              << "  Ctrl          Cycle thread priority (normal/low/idle)\n"
+              << "  Esc           Exit program\n";
     exit(code);
 }
 }  // namespace chrray

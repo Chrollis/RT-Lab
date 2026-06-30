@@ -61,6 +61,7 @@ private:
     int offline_fps_ = 24;
     bool save_single_frame_ = false;
     std::string save_directory_;
+    int priority_ = 1;
 
     cxxopts::Options opt_;
     scene sc_;
